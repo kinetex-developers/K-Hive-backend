@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import passport from './config/passport.js';
 import authRoutes from './routes/authRoutes.js';
 import postRoutes from './routes/postRoutes.js';
+import mediaRoutes from './routes/mediaRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
@@ -72,6 +73,7 @@ app.get('/health', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/post', postRoutes);
+app.use('/api/media', mediaRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);

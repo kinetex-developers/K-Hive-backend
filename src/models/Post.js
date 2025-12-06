@@ -18,6 +18,7 @@ class Post {
     this.isPinned = data.isPinned || false;
     this.isLocked = data.isLocked || false;
     this.viewCount = data.viewCount || 0;
+    this.media = data.media || []
   }
 
   // Create a new post
@@ -42,6 +43,7 @@ class Post {
         isPinned: newPost.isPinned,
         isLocked: newPost.isLocked,
         viewCount: newPost.viewCount,
+        media: newPost.media
       });
 
       if (result.acknowledged) {
@@ -305,28 +307,43 @@ class Post {
 
   // Update post
   static async updatePost(postId, updateData) {
-    try {
-      const collection = await mongocon.postsCollection();
-      if (!collection) throw new Error("Database connection failed");
+  try {
+    const collection = await mongocon.postsCollection();
+    if (!collection) throw new Error("Database connection failed");
 
-      updateData.updatedAt = new Date();
-
-      const result = await collection.updateOne(
-        { postId },
-        { $set: updateData }
-      );
-
-      if (result.modifiedCount > 0) {
-        await rediscon.postsCacheDel(postId);
-        return await Post.findByPostId(postId);
-      }
-
-      return null;
-    } catch (err) {
-      console.error("Error updating post:", err.message);
-      throw err;
+    // Only allow title and content to be updated
+    const allowedUpdates = {};
+    if (updateData.title !== undefined) {
+      allowedUpdates.title = updateData.title;
     }
+    if (updateData.content !== undefined) {
+      allowedUpdates.content = updateData.content;
+    }
+
+    // If no valid fields to update, return null
+    if (Object.keys(allowedUpdates).length === 0) {
+      return null;
+    }
+
+    // Always set updatedAt when making changes
+    allowedUpdates.updatedAt = new Date();
+
+    const result = await collection.updateOne(
+      { postId },
+      { $set: allowedUpdates }
+    );
+
+    if (result.modifiedCount > 0) {
+      await rediscon.postsCacheDel(postId);
+      return await Post.findByPostId(postId);
+    }
+
+    return null;
+  } catch (err) {
+    console.error("Error updating post:", err.message);
+    throw err;
   }
+}
 
   // Increment view count
   static async incrementViewCount(postId) {

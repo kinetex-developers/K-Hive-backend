@@ -420,11 +420,16 @@ static async getCommentsByUserId(userId, page = 1, limit = 20) {
       const collection = await mongocon.commentsCollection();
       if (!collection) throw new Error("Database connection failed");
 
+      // Validate that content is provided and not empty
+      if (content === undefined || content === null || content.trim() === "") {
+        return null;
+      }
+
       const result = await collection.updateOne(
         { commentId },
         {
           $set: {
-            content,
+            content: content.trim(),
             updatedAt: new Date(),
             isEdited: true,
           },
