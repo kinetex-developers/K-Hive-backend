@@ -62,28 +62,43 @@ export async function deleteFileByUrl(fileUrl) {
   }
 
   try {
-    const urlEndpoint = process.env.IMAGEKIT_URL_DELIVERY;
+    let urlEndpoint = process.env.IMAGEKIT_URL_DELIVERY;
+    
+    if (urlEndpoint.endsWith('/')) {
+      urlEndpoint = urlEndpoint.slice(0, -1);
+    }
     
     if (!fileUrl.startsWith(urlEndpoint)) {
       throw new Error("Invalid ImageKit URL");
     }
 
-    // Get the file path after the endpoint
-    const filePath = fileUrl.replace(urlEndpoint, '').split('?')[0];
+    let filePath = fileUrl.replace(urlEndpoint, '').split('?')[0];
     
-    // List files to find the fileId by filePath
+    if (filePath.startsWith('/')) {
+      filePath = filePath.substring(1);
+    }
+    
+    const fileName = filePath.split('/').pop();
+    
     const files = await imagekitInstance.listFiles({
-      searchQuery: `filePath="${filePath}"`
+      name: fileName
     });
 
     if (!files || files.length === 0) {
       throw new Error("File not found");
     }
 
-    const fileId = files[0].fileId;
+    let file = files.find(f => f.filePath === filePath || f.filePath === `/${filePath}`);
+    
+    if (!file && files.length === 1) {
+      file = files[0];
+    }
+    
+    if (!file) {
+      throw new Error("File not found with matching path");
+    }
 
-    // Delete the file
-    await imagekitInstance.deleteFile(fileId);
+    await imagekitInstance.deleteFile(file.fileId);
     
     return true;
   } catch (err) {
