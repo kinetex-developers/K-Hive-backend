@@ -168,10 +168,11 @@ export const getPostsByUserId = async (req, res) => {
 // Search posts
 export const searchPosts = async (req, res) => {
   try {
-    const { q } = req.query;
+    const { q, sortBy = "relevance" } = req.query;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
 
+    // Validate query
     if (!q || q.trim().length < 2) {
       return res.status(400).json({
         success: false,
@@ -187,7 +188,11 @@ export const searchPosts = async (req, res) => {
       });
     }
 
-    const result = await Post.searchPosts(q.trim(), page, limit);
+    // Validate sortBy
+    const validSortOptions = ["relevance", "recent", "popular"];
+    const finalSortBy = validSortOptions.includes(sortBy) ? sortBy : "relevance";
+    
+    const result = await Post.searchPosts(q.trim(), page, limit, finalSortBy);
 
     res.status(200).json({
       success: true,
@@ -195,9 +200,31 @@ export const searchPosts = async (req, res) => {
       data: result.posts,
       pagination: result.pagination,
       query: q.trim(),
+      sortBy: finalSortBy
     });
   } catch (err) {
     console.error("Error in searchPosts:", err.message);
+
+    // If text index error, try regex fallback
+    if(err.message.includes("text index")) {
+      console.log("Text index not found, using regex search as fallback.");
+      try {
+        const { q } = req.query;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const result = await Post.regexSearchPosts(q.trim(), page, limit);
+        return res.status(200).json({
+          success: true,
+          message: "Search results retrieved successfully (regex mode)",
+          data: result.posts,
+          pagination: result.pagination,
+          query: q.trim()
+        });
+      } catch (regexErr) {
+        console.error("Regex search also failed:", regexErr.message);
+      }
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to search posts",

@@ -268,28 +268,68 @@ class Post {
   }
  
   // Search posts by title or tags
-  static async searchPosts(query, page = 1, limit = 10) {
+  static async searchPosts(query, page = 1, limit = 10, sortby = "relevance") {
     try {
       const collection = await mongocon.postsCollection();
       if (!collection) throw new Error("Database connection failed");
 
       const skip = (page - 1) * limit;
 
-      const searchFilter = {
-        $or: [
-          { title: { $regex: query, $options: "i" } },
-          { tags: { $regex: query, $options: "i" } },
-        ],
-      };
+      // Build the search pipeline
+      const pipeline = [
+        { 
+          // Text search stage
+          $match: { 
+            $text: { $search: query } 
+          } 
+        },
+        {
+          // Add relevance score
+          $addFields: {
+            score: { $meta: "textScore" }
+          }
+        }
+      ];
 
-      const posts = await collection
-        .find(searchFilter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .toArray();
+      // Sorting logic
+      let sortStage;
+      if (sortby === "relevance") {
+        sortStage = { $sort: { score: -1 , createdAt: -1} };
+      } else if (sortby === "recent") {
+        sortStage = { $sort: { createdAt: -1 } };
+      } else if (sortby === "popular") {
+        sortStage = { $sort: { upvotes: -1, createdAt: -1 } };
+      } else {
+        sortStage = { $sort: { score: -1, createdAt: -1 } };
+      }
+      pipeline.push(sortStage);
 
-      const total = await collection.countDocuments(searchFilter);
+      // Use $facet to get results and count in one query
+      pipeline.push({
+        $facet: {
+          posts: [
+            { $skip: skip },
+            { $limit: limit }
+          ],
+          totalCount: [
+            { $count: "count" }
+          ]
+        }
+      });
+
+      const result = await collection.aggregate(pipeline).toArray();
+
+      const posts = result[0].posts;
+      const total = result[0].totalCount[0]?.count || 0;
+
+      // Cache the results
+      if (posts.length > 0) {
+        const cachePairs = {};
+        posts.forEach((post) => {
+          cachePairs[post.postId] = post;
+        });
+        await rediscon.postsCacheMSet(cachePairs);
+      }
 
       return {
         posts,
@@ -306,6 +346,56 @@ class Post {
     }
   }
 
+  // Alternative: Regex-based search (fallback if text index is not created)
+  static async searchPostsRegex(query, page = 1, limit = 10) {
+    try {
+      const collection = await mongocon.postsCollection();
+      if (!collection) throw new Error("Database connection failed");
+      
+      const skip = (page - 1) * limit;
+
+      // Case-insensitive regex search
+      const searchFilter = {
+        $or: [
+          { title: { $regex: query, $options: "i" } },
+          { content: { $regex: query, $options: "i" } },
+          { tags: { $regex: query, $options: "i" } }
+        ],
+      };
+
+      const result = await collection.aggregate([
+        { $match: searchFilter },
+        {
+          $facet: {
+            posts: [
+              { $sort: { createdAt: -1 } },
+              { $skip: skip },
+              { $limit: limit }
+            ],
+            totalCount: [
+              { $count: "count" }
+            ]
+          }
+        }
+      ]).toArray();
+
+      const posts = result[0].posts;
+      const total = result[0].totalCount[0]?.count || 0;
+
+      return {
+        posts,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (err) {
+      console.error("Error searching posts with regex:", err.message);
+      throw err;
+    }
+  }
   // Update post
   static async updatePost(postId, updateData) {
   try {

@@ -11,6 +11,7 @@ import postRoutes from './routes/postRoutes.js';
 import commentRoutes from './routes/commentRoutes.js';
 import mediaRoutes from './routes/mediaRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
+import createSearchIndexes from "./config/createIndexes.js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -57,7 +58,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
 // MongoDB connection
-mongocon.connectDB();
+await mongocon.connectDB();
+await createSearchIndexes();
 
 // Passport middleware (no session needed for JWT)
 app.use(passport.initialize());
