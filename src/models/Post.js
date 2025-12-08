@@ -129,38 +129,71 @@ class Post {
   }
 
   // Get all posts with pagination - OPTIMIZED VERSION
-static async populateUserData(posts) {
-  if (!posts || posts.length === 0) return posts;
+  static async populateUserData(posts) {
+    if (!posts || posts.length === 0) return posts;
 
-  try {
-    const collection = await mongocon.usersCollection();
-    if (!collection) return posts;
-
-    // Get unique user IDs
-    const userIds = [...new Set(posts.map(post => post.userId))];
-    
-    // Fetch users
-    const users = await collection
-      .find({ userId: { $in: userIds } })
-      .project({ userId: 1, name: 1, avatarLink: 1 })
-      .toArray();
-    
-    // Create a map for quick lookup
-    const userMap = new Map(users.map(user => [user.userId, user]));
-    
-    // Populate posts with user data
-    return posts.map(post => ({
-      ...post,
-      user: userMap.get(post.userId) || { 
-        userId: post.userId, 
-        name: 'Unknown User' 
+    try {
+      // Get unique user IDs
+      const userIds = [...new Set(posts.map(post => post.userId))];
+      
+      const userMap = new Map();
+      const missingUserIds = [];
+      
+      // Check cache first
+      for (const userId of userIds) {
+        const cachedUser = await rediscon.usersCacheGet(userId);
+        if (cachedUser) {
+          userMap.set(userId, {
+            userId: cachedUser.userId,
+            name: cachedUser.name,
+            avatarLink: cachedUser.avatarLink
+          });
+        } else {
+          missingUserIds.push(userId);
+        }
       }
-    }));
-  } catch (err) {
-    console.error("Error populating user data:", err.message);
-    return posts;
+      
+      // Fetch missing users from database
+      if (missingUserIds.length > 0) {
+        const collection = await mongocon.usersCollection();
+        if (collection) {
+          const users = await collection
+            .find({ userId: { $in: missingUserIds } })
+            .project({ userId: 1, name: 1, avatarLink: 1 })
+            .toArray();
+          
+          // Cache the fetched users and add to map
+          const cachePairs = {};
+          users.forEach(user => {
+            const userData = {
+              userId: user.userId,
+              name: user.name,
+              avatarLink: user.avatarLink
+            };
+            userMap.set(user.userId, userData);
+            // Cache the full user object (not just the projected fields)
+            cachePairs[user.userId] = user;
+          });
+          
+          if (Object.keys(cachePairs).length > 0) {
+            await rediscon.usersCacheMSet(cachePairs);
+          }
+        }
+      }
+      
+      // Populate posts with user data
+      return posts.map(post => ({
+        ...post,
+        user: userMap.get(post.userId) || { 
+          userId: post.userId, 
+          name: 'Unknown User' 
+        }
+      }));
+    } catch (err) {
+      console.error("Error populating user data:", err.message);
+      return posts;
+    }
   }
-}
 
 // Update getAllPosts to use population
 static async getAllPosts(page = 1, limit = 10, sortBy = "createdAt", order = -1) {
