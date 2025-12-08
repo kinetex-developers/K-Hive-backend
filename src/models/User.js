@@ -98,9 +98,14 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        return await User.findByUserId(userId);
+        // Invalidate cache Before fetching updated user
+        await rediscon.usersCacheDel(userId);
+        
+        // Fetch fresh data from DB and update cache
+        const updatedUser = await User.findByUserId(userId);
+        return updatedUser;
       }
-      rediscon.usersCacheDel(userId);
+      
       return null;
     } catch (err) {
       console.error("Error updating user:", err.message);
@@ -120,14 +125,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && !cachedUser.postIds.includes(postId)) {
-            cachedUser.postIds.push(postId);
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -176,14 +175,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && !cachedUser.commentIds.includes(commentId)) {
-            cachedUser.commentIds.push(commentId);
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -205,17 +198,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && cachedUser.postIds) {
-            const index = cachedUser.postIds.indexOf(postId);
-            if (index > -1) {
-              cachedUser.postIds.splice(index, 1);
-            }
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -237,17 +221,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && cachedUser.commentIds) {
-            const index = cachedUser.commentIds.indexOf(commentId);
-            if (index > -1) {
-              cachedUser.commentIds.splice(index, 1);
-            }
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -278,7 +253,7 @@ class User {
       if (!collection) throw new Error("Database connection failed");
 
       const result = await collection.deleteOne({ userId });
-      rediscon.usersCacheDel(userId);
+      await rediscon.usersCacheDel(userId);
       return result.deletedCount > 0;
     } catch (err) {
       console.error("Error deleting user:", err.message);

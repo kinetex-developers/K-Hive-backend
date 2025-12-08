@@ -129,138 +129,172 @@ class Post {
   }
 
   // Get all posts with pagination - OPTIMIZED VERSION
-  static async getAllPosts(page = 1, limit = 10, sortBy = "createdAt", order = -1) {
-    try {
-      const collection = await mongocon.postsCollection();
-      if (!collection) throw new Error("Database connection failed");
+static async populateUserData(posts) {
+  if (!posts || posts.length === 0) return posts;
 
-      const feedKey = Post.getFeedCacheKey(sortBy, order);
-      const start = (page - 1) * limit;
-      const end = start + limit - 1;
+  try {
+    const collection = await mongocon.usersCollection();
+    if (!collection) return posts;
 
-      // Try to get post IDs from feed cache
-      let postIds = await rediscon.feedCacheRange(feedKey, start, end);
-      
-      // If cache miss or insufficient data, rebuild cache
-      if (!postIds || postIds.length === 0) {
-        console.log(`[FEED CACHE] Miss for ${feedKey}, rebuilding...`);
-        await Post.rebuildFeedCache(sortBy, order, 50);
-        postIds = await rediscon.feedCacheRange(feedKey, start, end);
+    // Get unique user IDs
+    const userIds = [...new Set(posts.map(post => post.userId))];
+    
+    // Fetch users
+    const users = await collection
+      .find({ userId: { $in: userIds } })
+      .project({ userId: 1, name: 1, avatarLink: 1 })
+      .toArray();
+    
+    // Create a map for quick lookup
+    const userMap = new Map(users.map(user => [user.userId, user]));
+    
+    // Populate posts with user data
+    return posts.map(post => ({
+      ...post,
+      user: userMap.get(post.userId) || { 
+        userId: post.userId, 
+        name: 'Unknown User' 
       }
+    }));
+  } catch (err) {
+    console.error("Error populating user data:", err.message);
+    return posts;
+  }
+}
 
-      // If still no data, fall back to direct DB query
-      if (!postIds || postIds.length === 0) {
-        console.log(`[FEED CACHE] Fallback to DB query`);
-        return await Post.getAllPostsFromDB(page, limit, sortBy, order);
+// Update getAllPosts to use population
+static async getAllPosts(page = 1, limit = 10, sortBy = "createdAt", order = -1) {
+  try {
+    const collection = await mongocon.postsCollection();
+    if (!collection) throw new Error("Database connection failed");
+
+    const feedKey = Post.getFeedCacheKey(sortBy, order);
+    const start = (page - 1) * limit;
+    const end = start + limit - 1;
+
+    let postIds = await rediscon.feedCacheRange(feedKey, start, end);
+    
+    if (!postIds || postIds.length === 0) {
+      console.log(`[FEED CACHE] Miss for ${feedKey}, rebuilding...`);
+      await Post.rebuildFeedCache(sortBy, order, 50);
+      postIds = await rediscon.feedCacheRange(feedKey, start, end);
+    }
+
+    if (!postIds || postIds.length === 0) {
+      console.log(`[FEED CACHE] Fallback to DB query`);
+      const result = await Post.getAllPostsFromDB(page, limit, sortBy, order);
+      // Populate user data before returning
+      result.posts = await Post.populateUserData(result.posts);
+      return result;
+    }
+
+    const posts = [];
+    const missingIds = [];
+
+    for (const postId of postIds) {
+      const cachedPost = await rediscon.postsCacheGet(postId);
+      if (cachedPost) {
+        posts.push(cachedPost);
+      } else {
+        missingIds.push(postId);
       }
+    }
 
-      // Fetch posts: try cache first, then DB for misses
-      const posts = [];
-      const missingIds = [];
+    if (missingIds.length > 0) {
+      const missingPosts = await collection
+        .find({ postId: { $in: missingIds } })
+        .toArray();
 
-      for (const postId of postIds) {
-        const cachedPost = await rediscon.postsCacheGet(postId);
-        if (cachedPost) {
-          posts.push(cachedPost);
-        } else {
-          missingIds.push(postId);
+      const cachePairs = {};
+      missingPosts.forEach((post) => {
+        cachePairs[post.postId] = post;
+        posts.push(post);
+      });
+      await rediscon.postsCacheMSet(cachePairs);
+    }
+
+    const postsMap = new Map(posts.map(p => [p.postId, p]));
+    const orderedPosts = postIds
+      .map(id => postsMap.get(id))
+      .filter(Boolean);
+
+    // Populate user data
+    const populatedPosts = await Post.populateUserData(orderedPosts);
+
+    const totalKey = `posts:total:${sortBy}`;
+    let total = await rediscon.feedCacheGetTotal(totalKey);
+    
+    if (!total) {
+      total = await collection.countDocuments({});
+      await rediscon.feedCacheSetTotal(totalKey, total, 300);
+    }
+
+    return {
+      posts: populatedPosts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  } catch (err) {
+    console.error("Error getting all posts:", err.message);
+    throw err;
+  }
+}
+
+// fallback func getAllPostsFromDB
+static async getAllPostsFromDB(page = 1, limit = 10, sortBy = "createdAt", order = -1) {
+  try {
+    const collection = await mongocon.postsCollection();
+    if (!collection) throw new Error("Database connection failed");
+
+    const skip = (page - 1) * limit;
+
+    const result = await collection.aggregate([
+      {
+        $facet: {
+          posts: [
+            { $sort: { [sortBy]: order } },
+            { $skip: skip },
+            { $limit: limit }
+          ],
+          totalCount: [
+            { $count: "count" }
+          ]
         }
       }
+    ]).toArray();
 
-      // Fetch missing posts from DB
-      if (missingIds.length > 0) {
-        const missingPosts = await collection
-          .find({ postId: { $in: missingIds } })
-          .toArray();
+    const posts = result[0].posts;
+    const total = result[0].totalCount[0]?.count || 0;
 
-        // Cache the missing posts
-        const cachePairs = {};
-        missingPosts.forEach((post) => {
-          cachePairs[post.postId] = post;
-          posts.push(post);
-        });
-        await rediscon.postsCacheMSet(cachePairs);
-      }
+    // Populate user data
+    const populatedPosts = await Post.populateUserData(posts);
 
-      // Maintain original order from feed cache
-      const postsMap = new Map(posts.map(p => [p.postId, p]));
-      const orderedPosts = postIds
-        .map(id => postsMap.get(id))
-        .filter(Boolean);
-
-      // Get total count (with caching)
-      const totalKey = `posts:total:${sortBy}`;
-      let total = await rediscon.feedCacheGetTotal(totalKey);
-      
-      if (!total) {
-        total = await collection.countDocuments({});
-        await rediscon.feedCacheSetTotal(totalKey, total, 300); // Cache for 5 min
-      }
-
-      return {
-        posts: orderedPosts,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-        },
-      };
-    } catch (err) {
-      console.error("Error getting all posts:", err.message);
-      throw err;
+    if (posts.length > 0) {
+      const cachePairs = {};
+      posts.forEach((post) => {
+        cachePairs[post.postId] = post;
+      });
+      await rediscon.postsCacheMSet(cachePairs);
     }
+
+    return {
+      posts: populatedPosts,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  } catch (err) {
+    console.error("Error in getAllPostsFromDB:", err.message);
+    throw err;
   }
-
-  // Fallback: Direct DB query (original implementation)
-  static async getAllPostsFromDB(page = 1, limit = 10, sortBy = "createdAt", order = -1) {
-    try {
-      const collection = await mongocon.postsCollection();
-      if (!collection) throw new Error("Database connection failed");
-
-      const skip = (page - 1) * limit;
-
-      const result = await collection.aggregate([
-        {
-          $facet: {
-            posts: [
-              { $sort: { [sortBy]: order } },
-              { $skip: skip },
-              { $limit: limit }
-            ],
-            totalCount: [
-              { $count: "count" }
-            ]
-          }
-        }
-      ]).toArray();
-
-      const posts = result[0].posts;
-      const total = result[0].totalCount[0]?.count || 0;
-
-      // Cache fetched posts
-      if (posts.length > 0) {
-        const cachePairs = {};
-        posts.forEach((post) => {
-          cachePairs[post.postId] = post;
-        });
-        await rediscon.postsCacheMSet(cachePairs);
-      }
-
-      return {
-        posts,
-        pagination: {
-          page,
-          limit,
-          total,
-          totalPages: Math.ceil(total / limit),
-        },
-      };
-    } catch (err) {
-      console.error("Error in getAllPostsFromDB:", err.message);
-      throw err;
-    }
-  }
+}
 
   // Get posts by user ID
   static async getPostsByUserId(userId, page = 1, limit = 10) {
