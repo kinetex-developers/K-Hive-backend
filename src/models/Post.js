@@ -22,6 +22,47 @@ class Post {
     this.media = data.media || []
   }
 
+  // Helper: Get feed cache key based on sort options
+  static getFeedCacheKey(sortBy, order) {
+    return `posts:feed:${sortBy}:${order === 1 ? 'asc' : 'desc'}`;
+  }
+
+  // Helper: Rebuild feed cache from database
+  static async rebuildFeedCache(sortBy = "createdAt", order = -1, limit = 50) {
+    try {
+      const collection = await mongocon.postsCollection();
+      if (!collection) return false;
+
+      const posts = await collection
+        .find({})
+        .sort({ [sortBy]: order })
+        .limit(limit)
+        .toArray();
+
+      if (posts.length === 0) return true;
+
+      const feedKey = Post.getFeedCacheKey(sortBy, order);
+      
+      // Use Redis pipeline for atomic operation
+      await rediscon.feedCacheClear(feedKey);
+      await rediscon.feedCachePush(feedKey, posts.map(p => p.postId));
+      await rediscon.feedCacheTrim(feedKey, 0, limit - 1);
+
+      // Also cache individual posts
+      const cachePairs = {};
+      posts.forEach((post) => {
+        cachePairs[post.postId] = post;
+      });
+      await rediscon.postsCacheMSet(cachePairs);
+
+      console.log(`[FEED CACHE] Rebuilt ${feedKey} with ${posts.length} posts`);
+      return true;
+    } catch (err) {
+      console.error("Error rebuilding feed cache:", err.message);
+      return false;
+    }
+  }
+
   // Create a new post
   static async create(postData) {
     try {
@@ -48,8 +89,17 @@ class Post {
       });
 
       if (result.acknowledged) {
-        rediscon.postsCacheSet(newPost.postId, newPost);
-        User.addPost(newPost.userId,newPost.postId)
+        // Cache the post
+        await rediscon.postsCacheSet(newPost.postId, newPost);
+        
+        // Add to user's posts
+        await User.addPost(newPost.userId, newPost.postId);
+        
+        // Update feed caches (push to front, trim to size)
+        const feedKey = Post.getFeedCacheKey("createdAt", -1);
+        await rediscon.feedCachePushFront(feedKey, newPost.postId);
+        await rediscon.feedCacheTrim(feedKey, 0, 49); // Keep 50 posts
+        
         return newPost;
       }
       throw new Error("Failed to create post");
@@ -78,44 +128,77 @@ class Post {
     }
   }
 
-  // Get all posts with pagination
+  // Get all posts with pagination - OPTIMIZED VERSION
   static async getAllPosts(page = 1, limit = 10, sortBy = "createdAt", order = -1) {
     try {
       const collection = await mongocon.postsCollection();
       if (!collection) throw new Error("Database connection failed");
 
-      const skip = (page - 1) * limit;
+      const feedKey = Post.getFeedCacheKey(sortBy, order);
+      const start = (page - 1) * limit;
+      const end = start + limit - 1;
 
-      // Use aggregation pipeline with $facet to get posts and count in one query
-      const result = await collection.aggregate([
-        {
-          $facet: {
-            posts: [
-              { $sort: { [sortBy]: order } },
-              { $skip: skip },
-              { $limit: limit }
-            ],
-            totalCount: [
-              { $count: "count" }
-            ]
-          }
+      // Try to get post IDs from feed cache
+      let postIds = await rediscon.feedCacheRange(feedKey, start, end);
+      
+      // If cache miss or insufficient data, rebuild cache
+      if (!postIds || postIds.length === 0) {
+        console.log(`[FEED CACHE] Miss for ${feedKey}, rebuilding...`);
+        await Post.rebuildFeedCache(sortBy, order, 50);
+        postIds = await rediscon.feedCacheRange(feedKey, start, end);
+      }
+
+      // If still no data, fall back to direct DB query
+      if (!postIds || postIds.length === 0) {
+        console.log(`[FEED CACHE] Fallback to DB query`);
+        return await Post.getAllPostsFromDB(page, limit, sortBy, order);
+      }
+
+      // Fetch posts: try cache first, then DB for misses
+      const posts = [];
+      const missingIds = [];
+
+      for (const postId of postIds) {
+        const cachedPost = await rediscon.postsCacheGet(postId);
+        if (cachedPost) {
+          posts.push(cachedPost);
+        } else {
+          missingIds.push(postId);
         }
-      ]).toArray();
+      }
 
-      const posts = result[0].posts;
-      const total = result[0].totalCount[0]?.count || 0;
+      // Fetch missing posts from DB
+      if (missingIds.length > 0) {
+        const missingPosts = await collection
+          .find({ postId: { $in: missingIds } })
+          .toArray();
 
-      // Cache fetched posts (this still happens on your server, but unavoidable for caching)
-      if (posts.length > 0) {
+        // Cache the missing posts
         const cachePairs = {};
-        posts.forEach((post) => {
+        missingPosts.forEach((post) => {
           cachePairs[post.postId] = post;
+          posts.push(post);
         });
         await rediscon.postsCacheMSet(cachePairs);
       }
 
+      // Maintain original order from feed cache
+      const postsMap = new Map(posts.map(p => [p.postId, p]));
+      const orderedPosts = postIds
+        .map(id => postsMap.get(id))
+        .filter(Boolean);
+
+      // Get total count (with caching)
+      const totalKey = `posts:total:${sortBy}`;
+      let total = await rediscon.feedCacheGetTotal(totalKey);
+      
+      if (!total) {
+        total = await collection.countDocuments({});
+        await rediscon.feedCacheSetTotal(totalKey, total, 300); // Cache for 5 min
+      }
+
       return {
-        posts,
+        posts: orderedPosts,
         pagination: {
           page,
           limit,
@@ -129,94 +212,9 @@ class Post {
     }
   }
 
-  // Get posts by user ID
-  static async getPostsByUserId(userId, page = 1, limit = 10) {
+  // Fallback: Direct DB query (original implementation)
+  static async getAllPostsFromDB(page = 1, limit = 10, sortBy = "createdAt", order = -1) {
     try {
-      // First, try to get postIds from User collection
-      const userPosts = await User.getPosts(userId);
-      
-      if (userPosts.total > 0) {
-        // User exists and has posts in their postIds array
-        const skip = (page - 1) * limit;
-        const paginatedPostIds = userPosts.posts.slice(skip, skip + limit);
-
-        if (paginatedPostIds.length === 0) {
-          return {
-            posts: [],
-            pagination: {
-              page,
-              limit,
-              total: userPosts.total,
-              totalPages: Math.ceil(userPosts.total / limit),
-            },
-          };
-        }
-
-        // Check which posts exist in Redis cache
-        const cacheCheckPromises = paginatedPostIds.map(async postId => ({
-          postId,
-          inCache: await rediscon.postsCacheExists(postId)
-        }));
-        const cacheChecks = await Promise.all(cacheCheckPromises);
-
-        // Separate cached and non-cached post IDs
-        const cachedPostIds = cacheChecks
-          .filter(check => check.inCache)
-          .map(check => check.postId);
-        
-        const nonCachedPostIds = cacheChecks
-          .filter(check => !check.inCache)
-          .map(check => check.postId);
-
-        // Fetch cached posts from Redis
-        const cachedPostsPromises = cachedPostIds.map(postId =>
-          rediscon.postsCacheGet(postId)
-        );
-        const cachedPosts = await Promise.all(cachedPostsPromises);
-
-        let nonCachedPosts = [];
-        
-        // Fetch non-cached posts from MongoDB
-        if (nonCachedPostIds.length > 0) {
-          const collection = await mongocon.postsCollection();
-          if (!collection) throw new Error("Database connection failed");
-
-          nonCachedPosts = await collection
-            .find({ postId: { $in: nonCachedPostIds } })
-            .toArray();
-
-          // Cache the newly fetched posts
-          if (nonCachedPosts.length > 0) {
-            const cachePairs = {};
-            nonCachedPosts.forEach((post) => {
-              cachePairs[post.postId] = post;
-            });
-            await rediscon.postsCacheMSet(cachePairs);
-          }
-        }
-
-        // Combine cached and non-cached posts
-        const allPosts = [...cachedPosts, ...nonCachedPosts];
-
-        // Sort posts in the same order as paginatedPostIds
-        const postsMap = new Map(allPosts.map(post => [post.postId, post]));
-        const orderedPosts = paginatedPostIds
-          .map(id => postsMap.get(id))
-          .filter(Boolean);
-
-        return {
-          posts: orderedPosts,
-          pagination: {
-            page,
-            limit,
-            total: userPosts.total,
-            totalPages: Math.ceil(userPosts.total / limit),
-          },
-        };
-      }
-
-      // Fallback: User doesn't exist or postIds array is empty
-      // Query posts collection directly
       const collection = await mongocon.postsCollection();
       if (!collection) throw new Error("Database connection failed");
 
@@ -224,12 +222,9 @@ class Post {
 
       const result = await collection.aggregate([
         {
-          $match: { userId }
-        },
-        {
           $facet: {
             posts: [
-              { $sort: { createdAt: -1 } },
+              { $sort: { [sortBy]: order } },
               { $skip: skip },
               { $limit: limit }
             ],
@@ -262,6 +257,134 @@ class Post {
         },
       };
     } catch (err) {
+      console.error("Error in getAllPostsFromDB:", err.message);
+      throw err;
+    }
+  }
+
+  // Get posts by user ID
+  static async getPostsByUserId(userId, page = 1, limit = 10) {
+    try {
+      // First, try to get postIds from User collection
+      const userPosts = await User.getPosts(userId);
+      
+      if (userPosts.total > 0) {
+        const skip = (page - 1) * limit;
+        const paginatedPostIds = userPosts.posts.slice(skip, skip + limit);
+
+        if (paginatedPostIds.length === 0) {
+          return {
+            posts: [],
+            pagination: {
+              page,
+              limit,
+              total: userPosts.total,
+              totalPages: Math.ceil(userPosts.total / limit),
+            },
+          };
+        }
+
+        // Check cache and fetch missing
+        const cacheCheckPromises = paginatedPostIds.map(async postId => ({
+          postId,
+          inCache: await rediscon.postsCacheExists(postId)
+        }));
+        const cacheChecks = await Promise.all(cacheCheckPromises);
+
+        const cachedPostIds = cacheChecks
+          .filter(check => check.inCache)
+          .map(check => check.postId);
+        
+        const nonCachedPostIds = cacheChecks
+          .filter(check => !check.inCache)
+          .map(check => check.postId);
+
+        const cachedPostsPromises = cachedPostIds.map(postId =>
+          rediscon.postsCacheGet(postId)
+        );
+        const cachedPosts = await Promise.all(cachedPostsPromises);
+
+        let nonCachedPosts = [];
+        
+        if (nonCachedPostIds.length > 0) {
+          const collection = await mongocon.postsCollection();
+          if (!collection) throw new Error("Database connection failed");
+
+          nonCachedPosts = await collection
+            .find({ postId: { $in: nonCachedPostIds } })
+            .toArray();
+
+          if (nonCachedPosts.length > 0) {
+            const cachePairs = {};
+            nonCachedPosts.forEach((post) => {
+              cachePairs[post.postId] = post;
+            });
+            await rediscon.postsCacheMSet(cachePairs);
+          }
+        }
+
+        const allPosts = [...cachedPosts, ...nonCachedPosts];
+        const postsMap = new Map(allPosts.map(post => [post.postId, post]));
+        const orderedPosts = paginatedPostIds
+          .map(id => postsMap.get(id))
+          .filter(Boolean);
+
+        return {
+          posts: orderedPosts,
+          pagination: {
+            page,
+            limit,
+            total: userPosts.total,
+            totalPages: Math.ceil(userPosts.total / limit),
+          },
+        };
+      }
+
+      // Fallback: Query posts collection directly
+      const collection = await mongocon.postsCollection();
+      if (!collection) throw new Error("Database connection failed");
+
+      const skip = (page - 1) * limit;
+
+      const result = await collection.aggregate([
+        {
+          $match: { userId }
+        },
+        {
+          $facet: {
+            posts: [
+              { $sort: { createdAt: -1 } },
+              { $skip: skip },
+              { $limit: limit }
+            ],
+            totalCount: [
+              { $count: "count" }
+            ]
+          }
+        }
+      ]).toArray();
+
+      const posts = result[0].posts;
+      const total = result[0].totalCount[0]?.count || 0;
+
+      if (posts.length > 0) {
+        const cachePairs = {};
+        posts.forEach((post) => {
+          cachePairs[post.postId] = post;
+        });
+        await rediscon.postsCacheMSet(cachePairs);
+      }
+
+      return {
+        posts,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (err) {
       console.error("Error getting posts by user ID:", err.message);
       throw err;
     }
@@ -275,23 +398,19 @@ class Post {
 
       const skip = (page - 1) * limit;
 
-      // Build the search pipeline
       const pipeline = [
         { 
-          // Text search stage
           $match: { 
             $text: { $search: query } 
           } 
         },
         {
-          // Add relevance score
           $addFields: {
             score: { $meta: "textScore" }
           }
         }
       ];
 
-      // Sorting logic
       let sortStage;
       if (sortby === "relevance") {
         sortStage = { $sort: { score: -1 , createdAt: -1} };
@@ -304,7 +423,6 @@ class Post {
       }
       pipeline.push(sortStage);
 
-      // Use $facet to get results and count in one query
       pipeline.push({
         $facet: {
           posts: [
@@ -322,7 +440,6 @@ class Post {
       const posts = result[0].posts;
       const total = result[0].totalCount[0]?.count || 0;
 
-      // Cache the results
       if (posts.length > 0) {
         const cachePairs = {};
         posts.forEach((post) => {
@@ -346,7 +463,7 @@ class Post {
     }
   }
 
-  // Alternative: Regex-based search (fallback if text index is not created)
+  // Alternative: Regex-based search
   static async searchPostsRegex(query, page = 1, limit = 10) {
     try {
       const collection = await mongocon.postsCollection();
@@ -354,7 +471,6 @@ class Post {
       
       const skip = (page - 1) * limit;
 
-      // Case-insensitive regex search
       const searchFilter = {
         $or: [
           { title: { $regex: query, $options: "i" } },
@@ -396,45 +512,43 @@ class Post {
       throw err;
     }
   }
+
   // Update post
   static async updatePost(postId, updateData) {
-  try {
-    const collection = await mongocon.postsCollection();
-    if (!collection) throw new Error("Database connection failed");
+    try {
+      const collection = await mongocon.postsCollection();
+      if (!collection) throw new Error("Database connection failed");
 
-    // Only allow title and content to be updated
-    const allowedUpdates = {};
-    if (updateData.title !== undefined) {
-      allowedUpdates.title = updateData.title;
-    }
-    if (updateData.content !== undefined) {
-      allowedUpdates.content = updateData.content;
-    }
+      const allowedUpdates = {};
+      if (updateData.title !== undefined) {
+        allowedUpdates.title = updateData.title;
+      }
+      if (updateData.content !== undefined) {
+        allowedUpdates.content = updateData.content;
+      }
 
-    // If no valid fields to update, return null
-    if (Object.keys(allowedUpdates).length === 0) {
+      if (Object.keys(allowedUpdates).length === 0) {
+        return null;
+      }
+
+      allowedUpdates.updatedAt = new Date();
+
+      const result = await collection.updateOne(
+        { postId },
+        { $set: allowedUpdates }
+      );
+
+      if (result.modifiedCount > 0) {
+        await rediscon.postsCacheDel(postId);
+        return await Post.findByPostId(postId);
+      }
+
       return null;
+    } catch (err) {
+      console.error("Error updating post:", err.message);
+      throw err;
     }
-
-    // Always set updatedAt when making changes
-    allowedUpdates.updatedAt = new Date();
-
-    const result = await collection.updateOne(
-      { postId },
-      { $set: allowedUpdates }
-    );
-
-    if (result.modifiedCount > 0) {
-      await rediscon.postsCacheDel(postId);
-      return await Post.findByPostId(postId);
-    }
-
-    return null;
-  } catch (err) {
-    console.error("Error updating post:", err.message);
-    throw err;
   }
-}
 
   // Increment view count
   static async incrementViewCount(postId) {
@@ -477,6 +591,8 @@ class Post {
 
       if (result.modifiedCount > 0) {
         await rediscon.postsCacheDel(postId);
+        // Invalidate feed caches for "popular" sorting
+        await rediscon.feedCacheClear(Post.getFeedCacheKey("upvotes", -1));
       }
 
       return result.modifiedCount > 0;
@@ -508,7 +624,7 @@ class Post {
     }
   }
 
-  // Add comment ID to post's commentIds array
+  // Add comment
   static async addComment(postId, commentId) {
     try {
       const collection = await mongocon.postsCollection();
@@ -536,7 +652,7 @@ class Post {
     }
   }
 
-  // Remove comment ID from post's commentIds array
+  // Remove comment
   static async removeComment(postId, commentId) {
     try {
       const collection = await mongocon.postsCollection();
@@ -567,7 +683,7 @@ class Post {
     }
   }
 
-  // Toggle pin status
+  // Toggle pin
   static async togglePin(postId) {
     try {
       const collection = await mongocon.postsCollection();
@@ -592,7 +708,7 @@ class Post {
     }
   }
 
-  // Toggle lock status
+  // Toggle lock
   static async toggleLock(postId) {
     try {
       const collection = await mongocon.postsCollection();
@@ -623,11 +739,9 @@ class Post {
       const collection = await mongocon.postsCollection();
       if (!collection) throw new Error("Database connection failed");
 
-      // Get the post first to access media URLs
       const post = await collection.findOne({ postId });
       
       if (post && post.media && post.media.length > 0) {
-        // Delete all media files from ImageKit
         const deletePromises = post.media.map(async (mediaUrl) => {
             if(!(await deleteFileByUrl(mediaUrl)))
               console.error(`Failed to delete media: ${mediaUrl}`);
@@ -637,8 +751,23 @@ class Post {
       }
 
       const result = await collection.deleteOne({ postId });
-      await rediscon.postsCacheDel(postId);
-      await User.removePost(userId, postId);
+      
+      if (result.deletedCount > 0) {
+        // Remove from individual post cache
+        await rediscon.postsCacheDel(postId);
+        
+        // Remove from user's posts
+        await User.removePost(userId, postId);
+        
+        // Remove from ALL feed caches (more efficient than clearing)
+        await rediscon.feedCacheRemove(Post.getFeedCacheKey("createdAt", -1), postId);
+        await rediscon.feedCacheRemove(Post.getFeedCacheKey("createdAt", 1), postId);
+        await rediscon.feedCacheRemove(Post.getFeedCacheKey("upvotes", -1), postId);
+        
+        // Invalidate total count cache
+        await rediscon.feedCacheClear("posts:total:createdAt");
+        await rediscon.feedCacheClear("posts:total:upvotes");
+      }
       
       return result.deletedCount > 0;
     } catch (err) {
