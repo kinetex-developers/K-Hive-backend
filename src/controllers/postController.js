@@ -1,5 +1,6 @@
 import Post from "../models/Post.js";
 import User from "../models/User.js";
+import Vote from "../models/Vote.js";
 
 // Create a new post
 export const createPost = async (req, res) => {
@@ -371,6 +372,7 @@ export const deletePost = async (req, res) => {
 export const upvotePost = async (req, res) => {
   try {
     const { postId } = req.params;
+    const userId = req.user.userId; // From your auth middleware
 
     // Check if post exists
     const post = await Post.findByPostId(postId);
@@ -381,26 +383,29 @@ export const upvotePost = async (req, res) => {
       });
     }
 
-    const upvoted = await Post.upvote(postId);
+    const result = await Vote.handleUpvote(postId, userId);
 
-    if (upvoted) {
+    if (result.success) {
       const updatedPost = await Post.findByPostId(postId);
       res.status(200).json({
         success: true,
-        message: "Post upvoted successfully",
+        message: `Post ${result.action.replace(/_/g, ' ')}`,
         data: {
           postId,
           upvotes: updatedPost.upvotes,
+          downvotes: updatedPost.downvotes,
+          userVote: result.newVote,
+          action: result.action,
         },
       });
     } else {
-      throw new Error("Failed to upvote post");
+      throw new Error("Failed to process upvote");
     }
   } catch (err) {
     console.error("Error in upvotePost:", err.message);
     res.status(500).json({
       success: false,
-      message: "Failed to upvote post",
+      message: "Failed to process upvote",
       error: err.message,
     });
   }
@@ -410,6 +415,7 @@ export const upvotePost = async (req, res) => {
 export const downvotePost = async (req, res) => {
   try {
     const { postId } = req.params;
+    const userId = req.user.userId; // From your auth middleware
 
     // Check if post exists
     const post = await Post.findByPostId(postId);
@@ -420,26 +426,29 @@ export const downvotePost = async (req, res) => {
       });
     }
 
-    const downvoted = await Post.downvote(postId);
+    const result = await Vote.handleDownvote(postId, userId);
 
-    if (downvoted) {
+    if (result.success) {
       const updatedPost = await Post.findByPostId(postId);
       res.status(200).json({
         success: true,
-        message: "Post downvoted successfully",
+        message: `Post ${result.action.replace(/_/g, ' ')}`,
         data: {
           postId,
+          upvotes: updatedPost.upvotes,
           downvotes: updatedPost.downvotes,
+          userVote: result.newVote,
+          action: result.action,
         },
       });
     } else {
-      throw new Error("Failed to downvote post");
+      throw new Error("Failed to process downvote");
     }
   } catch (err) {
     console.error("Error in downvotePost:", err.message);
     res.status(500).json({
       success: false,
-      message: "Failed to downvote post",
+      message: "Failed to process downvote",
       error: err.message,
     });
   }

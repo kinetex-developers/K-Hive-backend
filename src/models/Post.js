@@ -646,47 +646,140 @@ static async getAllPostsFromDB(page = 1, limit = 10, sortBy = "createdAt", order
   }
 
   // Add upvote
-  static async upvote(postId) {
+static async upvote(postId) {
+  try {
+    const collection = await mongocon.postsCollection();
+    if (!collection) throw new Error("Database connection failed");
+
+    const result = await collection.updateOne(
+      { postId },
+      { $inc: { upvotes: 1 } }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Update cache instead of deleting
+      if (await rediscon.postsCacheExists(postId)) {
+        const cachedPost = await rediscon.postsCacheGet(postId);
+        if (cachedPost) {
+          cachedPost.upvotes = (cachedPost.upvotes || 0) + 1;
+          await rediscon.postsCacheSet(postId, cachedPost);
+        }
+      } else {
+        // If not in cache, fetch and cache the updated post
+        const updatedPost = await collection.findOne({ postId });
+        if (updatedPost) {
+          await rediscon.postsCacheSet(postId, updatedPost);
+        }
+      }
+    }
+
+    return result.modifiedCount > 0;
+  } catch (err) {
+    console.error("Error upvoting post:", err.message);
+    throw err;
+  }
+}
+
+  // Add downvote
+  static async downvote(postId) {
+  try {
+    const collection = await mongocon.postsCollection();
+    if (!collection) throw new Error("Database connection failed");
+
+    const result = await collection.updateOne(
+      { postId },
+      { $inc: { downvotes: 1 } }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Update cache instead of deleting
+      if (await rediscon.postsCacheExists(postId)) {
+        const cachedPost = await rediscon.postsCacheGet(postId);
+        if (cachedPost) {
+          cachedPost.downvotes = (cachedPost.downvotes || 0) + 1;
+          await rediscon.postsCacheSet(postId, cachedPost);
+        }
+      } else {
+        // If not in cache, fetch and cache the updated post
+        const updatedPost = await collection.findOne({ postId });
+        if (updatedPost) {
+          await rediscon.postsCacheSet(postId, updatedPost);
+        }
+      }
+    }
+
+    return result.modifiedCount > 0;
+  } catch (err) {
+    console.error("Error downvoting post:", err.message);
+    throw err;
+  }
+}
+  // Remove upvote (decrement upvote count)
+  static async removeUpvote(postId) {
     try {
       const collection = await mongocon.postsCollection();
       if (!collection) throw new Error("Database connection failed");
 
       const result = await collection.updateOne(
-        { postId },
-        { $inc: { upvotes: 1 } }
+        { postId, upvotes: { $gt: 0 } }, // Ensure upvotes don't go negative
+        { $inc: { upvotes: -1 } }
       );
 
       if (result.modifiedCount > 0) {
-        await rediscon.postsCacheDel(postId);
-        // Invalidate feed caches for "popular" sorting
-        await rediscon.feedCacheClear(Post.getFeedCacheKey("upvotes", -1));
+        // Update cache instead of deleting
+        if (await rediscon.postsCacheExists(postId)) {
+          const cachedPost = await rediscon.postsCacheGet(postId);
+          if (cachedPost && cachedPost.upvotes > 0) {
+            cachedPost.upvotes = cachedPost.upvotes - 1;
+            await rediscon.postsCacheSet(postId, cachedPost);
+          }
+        } else {
+          // If not in cache, fetch and cache the updated post
+          const updatedPost = await collection.findOne({ postId });
+          if (updatedPost) {
+            await rediscon.postsCacheSet(postId, updatedPost);
+          }
+        }
       }
 
       return result.modifiedCount > 0;
     } catch (err) {
-      console.error("Error upvoting post:", err.message);
+      console.error("Error removing upvote from post:", err.message);
       throw err;
     }
   }
 
-  // Add downvote
-  static async downvote(postId) {
+  // Remove downvote (decrement downvote count)
+  static async removeDownvote(postId) {
     try {
       const collection = await mongocon.postsCollection();
       if (!collection) throw new Error("Database connection failed");
 
       const result = await collection.updateOne(
-        { postId },
-        { $inc: { downvotes: 1 } }
+        { postId, downvotes: { $gt: 0 } }, // Ensure downvotes don't go negative
+        { $inc: { downvotes: -1 } }
       );
 
       if (result.modifiedCount > 0) {
-        await rediscon.postsCacheDel(postId);
+        // Update cache instead of deleting
+        if (await rediscon.postsCacheExists(postId)) {
+          const cachedPost = await rediscon.postsCacheGet(postId);
+          if (cachedPost && cachedPost.downvotes > 0) {
+            cachedPost.downvotes = cachedPost.downvotes - 1;
+            await rediscon.postsCacheSet(postId, cachedPost);
+          }
+        } else {
+          // If not in cache, fetch and cache the updated post
+          const updatedPost = await collection.findOne({ postId });
+          if (updatedPost) {
+            await rediscon.postsCacheSet(postId, updatedPost);
+          }
+        }
       }
 
       return result.modifiedCount > 0;
     } catch (err) {
-      console.error("Error downvoting post:", err.message);
+      console.error("Error removing downvote from post:", err.message);
       throw err;
     }
   }

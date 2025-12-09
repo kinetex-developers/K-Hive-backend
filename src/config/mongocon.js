@@ -47,4 +47,9 @@ async function commentsCollection() {
   return database.collection(process.env.COMMENTS_TABLE_NAME);
 }
 
-export default { connectDB, usersCollection, postsCollection, commentsCollection };
+async function postvoteCollection() {
+  const database = await connectDB();
+  return database.collection(process.env.POSTVOTE_TABLE_NAME);
+}
+
+export default { connectDB, usersCollection, postsCollection, commentsCollection, postvoteCollection };

@@ -27,7 +27,7 @@ router.put("/:postId", isAuthenticated, moderation, updatePost);
 router.delete("/:postId", isAuthenticated, deletePost);
 
 // Voting routes (require authentication)
-router.post("/:postId/upvote", isAuthenticated, upvotePost);
-router.post("/:postId/downvote", isAuthenticated, downvotePost);
+router.patch("/upvote/:postId", isAuthenticated, upvotePost);
+router.patch("/downvote/:postId", isAuthenticated, downvotePost);
 
 export default router;
