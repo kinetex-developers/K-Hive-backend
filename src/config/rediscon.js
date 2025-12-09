@@ -395,4 +395,7 @@ export default {
   postsCacheSet, postsCacheMSet, postsCacheGet, postsCacheDel, postsCacheClearTable, postsCacheExists,
   commentsCacheSet, commentsCacheMSet, commentsCacheGet, commentsCacheDel, commentsCacheClearTable, commentsCacheExists,
   feedCacheRange, feedCachePush, feedCachePushFront, feedCacheTrim, feedCacheClear, feedCacheRemove, feedCacheGetTotal, feedCacheSetTotal,
+  redisClient, redisClearPattern, 
 };
+
+export { redisClient, redisClearPattern };

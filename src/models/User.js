@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import mongocon from "../config/mongocon.js";
 import rediscon from "../config/rediscon.js";
+import PrefixSearchService from '../services/prefixSearchService.js';
 
 class User {
   constructor(data) {
@@ -44,6 +45,7 @@ class User {
 
       if (result.acknowledged) {
         rediscon.usersCacheSet(newUser.userId, newUser);
+        PrefixSearchService.indexUser(newUser);
         return newUser;
       }
       throw new Error("Failed to create user");
@@ -92,6 +94,10 @@ class User {
       const collection = await mongocon.usersCollection();
       if (!collection) throw new Error("Database connection failed");
 
+      //Get old user before update
+      const oldUser = await User.findByUserId(userId);
+      if (!oldUser) return null;
+
       const result = await collection.updateOne(
         { userId },
         { $set: updateData }
@@ -103,6 +109,11 @@ class User {
         
         // Fetch fresh data from DB and update cache
         const updatedUser = await User.findByUserId(userId);
+
+        if (updateData.name && oldUser.name !== updateData.name) {
+          PrefixSearchService.updateUserIndex(oldUser, updatedUser);
+        }
+
         return updatedUser;
       }
       
@@ -252,8 +263,12 @@ class User {
       const collection = await mongocon.usersCollection();
       if (!collection) throw new Error("Database connection failed");
 
+      const user = await User.findByUserId(userId);
+      if (!user) return false;
+
       const result = await collection.deleteOne({ userId });
       await rediscon.usersCacheDel(userId);
+      PrefixSearchService.removeUserIndex(user);
       return result.deletedCount > 0;
     } catch (err) {
       console.error("Error deleting user:", err.message);

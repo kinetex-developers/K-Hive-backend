@@ -12,8 +12,10 @@ import commentRoutes from './routes/commentRoutes.js';
 import mediaRoutes from './routes/mediaRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 import createSearchIndexes from "./config/createIndexes.js";
+import searchRoutes from './routes/searchRoutes.js'; 
 import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import PrefixSearchService from './services/prefixSearchService.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -63,6 +65,9 @@ app.use(cookieParser());
 await mongocon.connectDB();
 await createSearchIndexes();
 
+// Initialize prefix tree index (non-blocking)
+PrefixSearchService.initializeIndexIfNeeded();
+
 // Passport middleware (no session needed for JWT)
 app.use(passport.initialize());
 
@@ -82,6 +87,7 @@ app.use('/api/comment', commentRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/admin', adminRoutes);
 app.use("/api/users", userRoutes);
+app.use('/api/search', searchRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
