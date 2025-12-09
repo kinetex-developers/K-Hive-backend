@@ -12,6 +12,8 @@ import commentRoutes from './routes/commentRoutes.js';
 import mediaRoutes from './routes/mediaRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 import createSearchIndexes from "./config/createIndexes.js";
+import adminRoutes from './routes/adminRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -78,6 +80,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/post', postRoutes);
 app.use('/api/comment', commentRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/admin', adminRoutes);
+app.use("/api/users", userRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);

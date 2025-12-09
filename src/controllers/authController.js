@@ -37,6 +37,7 @@ export const getCurrentUser = (req, res) => {
     user: {
       userId: req.user.userId,
       name: req.user.name,
+      role: req.user.role,
       gmailId: req.user.gmailId,
       avatarLink: req.user.avatarLink,
       joinDate: req.user.joinDate,

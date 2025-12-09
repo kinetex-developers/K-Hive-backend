@@ -9,8 +9,6 @@ import {
   deletePost,
   upvotePost,
   downvotePost,
-  togglePinPost,
-  toggleLockPost,
 } from "../controllers/postController.js";
 import { isAuthenticated, attachUser } from "../middleware/authMiddleware.js";
 import moderation from "../middleware/moderation.js";
@@ -31,9 +29,5 @@ router.delete("/:postId", isAuthenticated, deletePost);
 // Voting routes (require authentication)
 router.post("/:postId/upvote", isAuthenticated, upvotePost);
 router.post("/:postId/downvote", isAuthenticated, downvotePost);
-
-// Admin routes (admin middleware needed)
-// router.patch("/:postId/pin", isAuthenticated, togglePinPost);
-// router.patch("/:postId/lock", isAuthenticated, toggleLockPost);
 
 export default router;
