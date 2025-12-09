@@ -77,6 +77,7 @@ export const getAllPosts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const sortBy = req.query.sortBy || "createdAt";
     const order = req.query.order === "asc" ? 1 : -1;
+    const userId = req.user?.userId || null; // Get userId if authenticated
 
     // Validate pagination
     if (page < 1 || limit < 1 || limit > 100) {
@@ -86,7 +87,7 @@ export const getAllPosts = async (req, res) => {
       });
     }
 
-    const result = await Post.getAllPosts(page, limit, sortBy, order);
+    const result = await Post.getAllPosts(page, limit, sortBy, order, userId);
 
     res.status(200).json({
       success: true,
@@ -107,6 +108,7 @@ export const getAllPosts = async (req, res) => {
 export const getPostById = async (req, res) => {
   try {
     const { postId } = req.params;
+    const userId = req.user?.userId || null; // Get userId if authenticated
 
     const post = await Post.findByPostId(postId);
 
@@ -119,7 +121,10 @@ export const getPostById = async (req, res) => {
 
     // Populate user data
     const populatedPosts = await Post.populateUserData([post]);
-    const populatedPost = populatedPosts[0];
+    
+    // Populate vote data for the current user
+    const postsWithVotes = await Post.populateVoteData(populatedPosts, userId);
+    const populatedPost = postsWithVotes[0];
 
     // Increment view count
     await Post.incrementViewCount(postId);
