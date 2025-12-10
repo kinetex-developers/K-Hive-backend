@@ -31,7 +31,7 @@ router.put("/:commentId", isAuthenticated, moderation, updateComment);
 router.delete("/:commentId", isAuthenticated, softDeleteComment);
 
 // Voting routes (require authentication)
-router.post("/:commentId/upvote", isAuthenticated, upvoteComment);
-router.post("/:commentId/downvote", isAuthenticated, downvoteComment);
+//router.post("/:commentId/upvote", isAuthenticated, upvoteComment);
+//router.post("/:commentId/downvote", isAuthenticated, downvoteComment);
 
 export default router;
