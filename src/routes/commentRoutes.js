@@ -7,6 +7,7 @@ import {
   getCommentById,
   updateComment,
   softDeleteComment,
+  hardDeleteComment,
   upvoteComment,
   downvoteComment,
   getCommentCount,
@@ -28,7 +29,7 @@ router.get("/:commentId/replycount", attachUser, getReplyCount);
 // Protected routes (require authentication)
 router.post("/", isAuthenticated, moderation, createComment);
 router.put("/:commentId", isAuthenticated, moderation, updateComment);
-router.delete("/:commentId", isAuthenticated, softDeleteComment);
+router.delete("/:commentId", isAuthenticated, hardDeleteComment);
 
 // Voting routes (require authentication)
 //router.post("/:commentId/upvote", isAuthenticated, upvoteComment);
