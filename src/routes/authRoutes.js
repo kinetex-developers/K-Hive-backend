@@ -10,12 +10,12 @@ import {
   updateUser,
 } from "../controllers/authController.js";
 import {
-  loginRateLimit,
   userUpdateRateLimit
 } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
+//Login/Sign-up ratelimiting handled inside passport.authenticate
 router.get(
   "/google",
   isNotAuthenticated,
@@ -31,13 +31,12 @@ router.get(
     failureRedirect: `${process.env.FRONTEND_URL}/login?error=auth_failed`,
     session: false,
   }),
-  loginRateLimit,
   googleCallback
 );
 
-router.get("/user", isAuthenticated, userUpdateRateLimit, getCurrentUser);
+router.get("/user", isAuthenticated, getCurrentUser);
 
-router.put("/user", isAuthenticated, updateUser);
+router.put("/user", isAuthenticated, userUpdateRateLimit, updateUser);
 
 router.get("/check", checkAuth);
 

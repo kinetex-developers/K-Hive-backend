@@ -9,6 +9,7 @@ import {
   VOTING, //per minute
   POST_UPDATE, //per hour
   POST_CREATE, //per hour
+  FEEDBACK, //per hour
  } from './rlconfig.js';
 const rateLimitRedisUrl = process.env.RATE_LIMIT_REDIS_URL || process.env.REDIS_URL;
 
@@ -181,6 +182,25 @@ async function checkMediaUploadLimit(userId) {
   }
 }
 
+async function checkFeedbackLimit(userId) {
+  try {
+    const limiter = await getRateLimiter();
+    const key = rateKey(userId, "feedback");
+    
+    const result = await limiter.allowPerHour(key, FEEDBACK);
+    
+    if (!result.allowed) {
+      console.log(`[RATE LIMIT] Feedback blocked for user ${userId}, retry after ${result.retryAfter}s`);
+    }
+    
+    return result;
+  } catch (err) {
+    console.error("Rate limit check error (feedback):", err.message);
+    // Fail open - allow the request if rate limiter fails
+    return { allowed: true, retryAfter: 0 };
+  }
+}
+
 async function checkLoginLimit(identifier) {
   try {
     const limiter = await getRateLimiter();
@@ -270,7 +290,8 @@ export default {
   checkVotingLimit,
   checkMediaUploadLimit,
   checkCustomLimit,
-  resetRateLimit
+  resetRateLimit,
+  checkFeedbackLimit,
 };
 
 export {
@@ -285,5 +306,6 @@ export {
   checkVotingLimit,
   checkMediaUploadLimit,
   checkCustomLimit,
-  resetRateLimit
+  resetRateLimit,
+  checkFeedbackLimit,
 };

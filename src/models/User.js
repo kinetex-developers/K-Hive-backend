@@ -124,6 +124,33 @@ class User {
     }
   }
 
+  // Update user's avatar link
+  static async updateAvatarLink(userId, avatarLink) {
+    try {
+      const collection = await mongocon.usersCollection();
+      if (!collection) throw new Error("Database connection failed");
+
+      const result = await collection.updateOne(
+        { userId },
+        { $set: { avatarLink } }
+      );
+
+      if (result.modifiedCount > 0) {
+        // Invalidate cache before fetching updated user
+        await rediscon.usersCacheDel(userId);
+        
+        // Fetch fresh data from DB and update cache
+        const updatedUser = await User.findByUserId(userId);
+        return updatedUser;
+      }
+      
+      return null;
+    } catch (err) {
+      console.error("Error updating avatar link:", err.message);
+      throw err;
+    }
+  }
+
   // Add post ID to user's postIds array
   static async addPost(userId, postId) {
     try {

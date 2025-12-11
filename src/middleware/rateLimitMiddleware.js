@@ -1,4 +1,3 @@
-// middleware/rateLimitMiddleware.js
 import {
   checkPostCreationLimit,
   checkPostUpdateLimit,
@@ -7,12 +6,10 @@ import {
   checkCommentUpdateLimit,
   checkMediaUploadLimit,
   checkLoginLimit,
-  checkUserUpdateLimit
+  checkUserUpdateLimit,
+  checkFeedbackLimit,
 } from "../config/redisRateLimitHandler.js";
 
-/**
- * Rate limit middleware for post creation
- */
 export async function postCreationRateLimit(req, res, next) {
   try {
     const userId = req.user?.id || req.user?._id?.toString();
@@ -43,9 +40,6 @@ export async function postCreationRateLimit(req, res, next) {
   }
 }
 
-/**
- * Rate limit middleware for post updates
- */
 export async function postUpdateRateLimit(req, res, next) {
   try {
     const userId = req.user?.id || req.user?._id?.toString();
@@ -76,9 +70,6 @@ export async function postUpdateRateLimit(req, res, next) {
   }
 }
 
-/**
- * Rate limit middleware for voting
- */
 export async function votingRateLimit(req, res, next) {
   try {
     const userId = req.user?.id || req.user?._id?.toString();
@@ -109,9 +100,6 @@ export async function votingRateLimit(req, res, next) {
   }
 }
 
-/**
- * Rate limit middleware for comment creation
- */
 export async function commentCreationRateLimit(req, res, next) {
   try {
     const userId = req.user?.id || req.user?._id?.toString();
@@ -142,9 +130,6 @@ export async function commentCreationRateLimit(req, res, next) {
   }
 }
 
-/**
- * Rate limit middleware for comment updates
- */
 export async function commentUpdateRateLimit(req, res, next) {
   try {
     const userId = req.user?.id || req.user?._id?.toString();
@@ -175,9 +160,6 @@ export async function commentUpdateRateLimit(req, res, next) {
   }
 }
 
-/**
- * Rate limit middleware for media upload credential requests
- */
 export async function mediaUploadRateLimit(req, res, next) {
   try {
     const userId = req.user?.id || req.user?._id?.toString();
@@ -208,40 +190,61 @@ export async function mediaUploadRateLimit(req, res, next) {
   }
 }
 
-/**
- * Rate limit middleware for login attempts
- * Uses IP address or email as identifier
- */
-export async function loginRateLimit(req, res, next) {
+export async function feedbackRateLimit(req, res, next) {
   try {
-    // Use email from OAuth profile or IP address as fallback
-    const identifier = req.user?.email || 
-                      req.ip || 
-                      req.headers['x-forwarded-for']?.split(',')[0] || 
-                      'unknown';
+    const userId = req.user?.id || req.user?._id?.toString();
+    
+    if (!userId) {
+      return res.status(401).json({ 
+        success: false,
+        message: "Authentication required" 
+      });
+    }
 
-    const result = await checkLoginLimit(identifier);
+    const result = await checkFeedbackLimit(userId);
     
     if (!result.allowed) {
       res.set("Retry-After", String(result.retryAfter));
       return res.status(429).json({
         success: false,
-        message: "Too many login attempts. Please try again later.",
+        message: "Too many feedback requests. Please try again later.",
         retryAfter: result.retryAfter
       });
     }
 
     next();
   } catch (err) {
-    console.error("Login rate limit error:", err.message);
+    console.error("Feedback rate limit error:", err.message);
     // Fail open - allow the request if middleware fails
     next();
   }
 }
 
 /**
- * Rate limit middleware for user profile updates
+ * Rate limit middleware for login attempts
+ * Uses IP address or email as identifier
  */
+export async function loginRateLimit(userData) {
+  try {
+    const identifier = userData.gmailId;
+    const result = await checkLoginLimit(identifier);
+    
+    if (!result.allowed) {
+      return {
+        success: false,
+        message: "Too many login attempts. Please try again later.",
+        retryAfter: result.retryAfter
+      };
+    }
+  } catch (err) {
+    throw new Error("Login rate limit error:", err.message);
+    // Fail open - allow the request if middleware fails
+  }
+  return {
+        success: true,
+    };
+}
+
 export async function userUpdateRateLimit(req, res, next) {
   try {
     const userId = req.user?.id || req.user?._id?.toString();
@@ -280,5 +283,6 @@ export default {
   commentUpdateRateLimit,
   mediaUploadRateLimit,
   loginRateLimit,
-  userUpdateRateLimit
+  userUpdateRateLimit,
+  feedbackRateLimit,
 };
