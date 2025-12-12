@@ -7,10 +7,15 @@ import {
   logout,
   checkAuth,
   refreshToken,
+  updateUser,
 } from "../controllers/authController.js";
+import {
+  userUpdateRateLimit
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
+//Login/Sign-up ratelimiting handled inside passport.authenticate
 router.get(
   "/google",
   isNotAuthenticated,
@@ -30,6 +35,8 @@ router.get(
 );
 
 router.get("/user", isAuthenticated, getCurrentUser);
+
+router.put("/user", isAuthenticated, userUpdateRateLimit, updateUser);
 
 router.get("/check", checkAuth);
 

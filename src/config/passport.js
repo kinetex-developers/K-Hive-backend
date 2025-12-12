@@ -2,7 +2,7 @@ import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as JwtStrategy, ExtractJwt } from "passport-jwt";
 import User from "../models/User.js";
-
+import {loginRateLimit} from "../middleware/rateLimitMiddleware.js";
 // Google OAuth Strategy
 passport.use(
   new GoogleStrategy(
@@ -20,7 +20,10 @@ passport.use(
           gmailId: profile.emails[0].value,
           avatarLink: profile.photos[0]?.value || null,
         };
-
+        let rl = await loginRateLimit(userData)
+        if(!rl.success){
+          return done(new Error(rl.message), null);
+        }
         // Check if user exists
         let user = await User.findByGmailId(userData.gmailId);
 
@@ -30,7 +33,7 @@ passport.use(
         } else {
           // Update avatar if it has changed
           if (user.avatarLink !== userData.avatarLink) {
-            user = await User.updateUser(user.userId, {
+            user = await User.updateAvatarLink(user.userId, {
               avatarLink: userData.avatarLink,
             });
           }

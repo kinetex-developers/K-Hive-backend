@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import mongocon from "../config/mongocon.js";
 import rediscon from "../config/rediscon.js";
+import PrefixSearchService from '../services/prefixSearchService.js';
 
 class User {
   constructor(data) {
@@ -44,6 +45,7 @@ class User {
 
       if (result.acknowledged) {
         rediscon.usersCacheSet(newUser.userId, newUser);
+        PrefixSearchService.indexUser(newUser);
         return newUser;
       }
       throw new Error("Failed to create user");
@@ -92,18 +94,59 @@ class User {
       const collection = await mongocon.usersCollection();
       if (!collection) throw new Error("Database connection failed");
 
+      //Get old user before update
+      const oldUser = await User.findByUserId(userId);
+      if (!oldUser) return null;
+
       const result = await collection.updateOne(
         { userId },
         { $set: updateData }
       );
 
       if (result.modifiedCount > 0) {
-        return await User.findByUserId(userId);
+        // Invalidate cache Before fetching updated user
+        await rediscon.usersCacheDel(userId);
+        
+        // Fetch fresh data from DB and update cache
+        const updatedUser = await User.findByUserId(userId);
+
+        if (updateData.name && oldUser.name !== updateData.name) {
+          PrefixSearchService.updateUserIndex(oldUser, updatedUser);
+        }
+
+        return updatedUser;
       }
-      rediscon.usersCacheDel(userId);
+      
       return null;
     } catch (err) {
       console.error("Error updating user:", err.message);
+      throw err;
+    }
+  }
+
+  // Update user's avatar link
+  static async updateAvatarLink(userId, avatarLink) {
+    try {
+      const collection = await mongocon.usersCollection();
+      if (!collection) throw new Error("Database connection failed");
+
+      const result = await collection.updateOne(
+        { userId },
+        { $set: { avatarLink } }
+      );
+
+      if (result.modifiedCount > 0) {
+        // Invalidate cache before fetching updated user
+        await rediscon.usersCacheDel(userId);
+        
+        // Fetch fresh data from DB and update cache
+        const updatedUser = await User.findByUserId(userId);
+        return updatedUser;
+      }
+      
+      return null;
+    } catch (err) {
+      console.error("Error updating avatar link:", err.message);
       throw err;
     }
   }
@@ -120,14 +163,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && !cachedUser.postIds.includes(postId)) {
-            cachedUser.postIds.push(postId);
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -164,6 +201,48 @@ class User {
     }
   }
 
+  // Toggle ban status for user
+  static async toggleBanUser(userId) {
+    try {
+      const collection = await mongocon.usersCollection();
+      if (!collection) throw new Error("Database connection failed");
+
+      const user = await User.findByUserId(userId);
+      if (!user) throw new Error("User Does not Exists");
+
+      // Prevent banning admin users
+      if (user.role === "admin") {
+        throw new Error("Cannot ban admin users");
+      }
+      
+      let newRole;
+      if (user.role.endsWith("-ban")) {
+        // If currently banned, restore to original role
+        newRole = user.role.replace("-ban", "");
+      } else {
+        // If not banned, append -ban to current role
+        newRole = `${user.role}-ban`;
+      }
+
+      const result = await collection.updateOne(
+        { userId },
+        { $set: { role: newRole } }
+      );
+
+      if (result.modifiedCount > 0) {
+        // Invalidate cache and fetch updated user
+        await rediscon.usersCacheDel(userId);
+        const updatedUser = await User.findByUserId(userId);
+        return updatedUser;
+      }
+
+      return null;
+    } catch (err) {
+      console.error("Error toggling ban status:", err.message);
+      throw err;
+    }
+  }
+
   // Add comment ID to user's commentIds array
   static async addComment(userId, commentId) {
     try {
@@ -176,14 +255,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && !cachedUser.commentIds.includes(commentId)) {
-            cachedUser.commentIds.push(commentId);
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -205,17 +278,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && cachedUser.postIds) {
-            const index = cachedUser.postIds.indexOf(postId);
-            if (index > -1) {
-              cachedUser.postIds.splice(index, 1);
-            }
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -237,17 +301,8 @@ class User {
       );
 
       if (result.modifiedCount > 0) {
-        // Update cache if user exists in cache
-        if (await rediscon.usersCacheExists(userId)) {
-          const cachedUser = await rediscon.usersCacheGet(userId);
-          if (cachedUser && cachedUser.commentIds) {
-            const index = cachedUser.commentIds.indexOf(commentId);
-            if (index > -1) {
-              cachedUser.commentIds.splice(index, 1);
-            }
-            await rediscon.usersCacheSet(userId, cachedUser);
-          }
-        }
+        // Invalidate cache to ensure fresh data
+        await rediscon.usersCacheDel(userId);
       }
 
       return result.modifiedCount > 0;
@@ -277,8 +332,12 @@ class User {
       const collection = await mongocon.usersCollection();
       if (!collection) throw new Error("Database connection failed");
 
+      const user = await User.findByUserId(userId);
+      if (!user) return false;
+
       const result = await collection.deleteOne({ userId });
-      rediscon.usersCacheDel(userId);
+      await rediscon.usersCacheDel(userId);
+      PrefixSearchService.removeUserIndex(user);
       return result.deletedCount > 0;
     } catch (err) {
       console.error("Error deleting user:", err.message);
@@ -286,5 +345,7 @@ class User {
     }
   }
 }
+
+
 
 export default User;

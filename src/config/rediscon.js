@@ -279,8 +279,123 @@ async function commentsCacheExists(key) {
   return await redisExists(`${comments_cache_name}:${key}`);
 }
 
+// Feed Cache Functions (using Redis Lists)
+async function feedCacheRange(key, start, end) {
+  const client = await redisClient();
+  if (!client) return null;
+
+  try {
+    const ids = await client.lrange(key, start, end);
+    return ids.length > 0 ? ids : null;
+  } catch (err) {
+    console.error("Redis LRANGE error:", err.message);
+    return null;
+  }
+}
+
+async function feedCachePush(key, postIds) {
+  const client = await redisClient();
+  if (!client) return false;
+
+  try {
+    if (Array.isArray(postIds) && postIds.length > 0) {
+      await client.rpush(key, ...postIds);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error("Redis RPUSH error:", err.message);
+    return false;
+  }
+}
+
+async function feedCachePushFront(key, postId) {
+  const client = await redisClient();
+  if (!client) return false;
+
+  try {
+    await client.lpush(key, postId);
+    return true;
+  } catch (err) {
+    console.error("Redis LPUSH error:", err.message);
+    return false;
+  }
+}
+
+async function feedCacheTrim(key, start, end) {
+  const client = await redisClient();
+  if (!client) return false;
+
+  try {
+    await client.ltrim(key, start, end);
+    return true;
+  } catch (err) {
+    console.error("Redis LTRIM error:", err.message);
+    return false;
+  }
+}
+
+async function feedCacheClear(key) {
+  const client = await redisClient();
+  if (!client) return false;
+
+  try {
+    await client.del(key);
+    return true;
+  } catch (err) {
+    console.error("Redis DEL error:", err.message);
+    return false;
+  }
+}
+
+async function feedCacheRemove(key, postId) {
+  const client = await redisClient();
+  if (!client) return false;
+
+  try {
+    // LREM removes all occurrences of postId from the list
+    // count=0 means remove all occurrences
+    const removed = await client.lrem(key, 0, postId);
+    console.log(`[FEED CACHE] Removed ${postId} from ${key}, count: ${removed}`);
+    return removed > 0;
+  } catch (err) {
+    console.error("Redis LREM error:", err.message);
+    return false;
+  }
+}
+
+async function feedCacheGetTotal(key) {
+  const client = await redisClient();
+  if (!client) return null;
+
+  try {
+    const total = await client.get(key);
+    return total ? parseInt(total, 10) : null;
+  } catch (err) {
+    console.error("Redis GET total error:", err.message);
+    return null;
+  }
+}
+
+async function feedCacheSetTotal(key, total, ttl = 300) {
+  const client = await redisClient();
+  if (!client) return false;
+
+  try {
+    await client.set(key, total.toString(), "EX", ttl);
+    return true;
+  } catch (err) {
+    console.error("Redis SET total error:", err.message);
+    return false;
+  }
+}
+
 export default { 
-  usersCacheSet,usersCacheMSet,usersCacheGet,usersCacheDel,usersCacheClearTable,usersCacheExists,
-  postsCacheSet,postsCacheMSet,postsCacheGet,postsCacheDel,postsCacheClearTable,postsCacheExists,
-  commentsCacheSet,commentsCacheMSet,commentsCacheGet,commentsCacheDel,commentsCacheClearTable,commentsCacheExists,
+  usersCacheSet, usersCacheMSet, usersCacheGet, usersCacheDel, usersCacheClearTable, usersCacheExists,
+  postsCacheSet, postsCacheMSet, postsCacheGet, postsCacheDel, postsCacheClearTable, postsCacheExists,
+  commentsCacheSet, commentsCacheMSet, commentsCacheGet, commentsCacheDel, commentsCacheClearTable, commentsCacheExists,
+  feedCacheRange, feedCachePush, feedCachePushFront, feedCacheTrim, feedCacheClear, feedCacheRemove, feedCacheGetTotal, feedCacheSetTotal,
+  redisClient, redisClearPattern, 
 };
+
+export { redisClient, redisClearPattern };

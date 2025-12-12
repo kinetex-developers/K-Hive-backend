@@ -7,6 +7,7 @@ import {
   getCommentById,
   updateComment,
   softDeleteComment,
+  hardDeleteComment,
   upvoteComment,
   downvoteComment,
   getCommentCount,
@@ -14,6 +15,10 @@ import {
 } from "../controllers/commentController.js";
 import { isAuthenticated, attachUser } from "../middleware/authMiddleware.js";
 import moderation from "../middleware/moderation.js";
+import {
+  commentCreationRateLimit,
+  commentUpdateRateLimit
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
@@ -26,12 +31,12 @@ router.get("/:commentId/replies", attachUser, getRepliesByCommentId);
 router.get("/:commentId/replycount", attachUser, getReplyCount);
 
 // Protected routes (require authentication)
-router.post("/", isAuthenticated, moderation, createComment);
-router.put("/:commentId", isAuthenticated, moderation, updateComment);
-router.delete("/:commentId", isAuthenticated, softDeleteComment);
+router.post("/", isAuthenticated, commentCreationRateLimit, moderation, createComment);
+router.put("/:commentId", isAuthenticated, commentUpdateRateLimit, moderation, updateComment);
+router.delete("/:commentId", isAuthenticated, hardDeleteComment);
 
 // Voting routes (require authentication)
-router.post("/:commentId/upvote", isAuthenticated, upvoteComment);
-router.post("/:commentId/downvote", isAuthenticated, downvoteComment);
+//router.post("/:commentId/upvote", isAuthenticated, upvoteComment);
+//router.post("/:commentId/downvote", isAuthenticated, downvoteComment);
 
 export default router;

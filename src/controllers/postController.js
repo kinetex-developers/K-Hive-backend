@@ -1,10 +1,11 @@
 import Post from "../models/Post.js";
 import User from "../models/User.js";
+import Vote from "../models/Vote.js";
 
 // Create a new post
 export const createPost = async (req, res) => {
   try {
-    const { title, content, tags } = req.body;
+    const { title, content, tags, media } = req.body;
     const userId = req.user.userId;
 
     // Validation
@@ -29,15 +30,26 @@ export const createPost = async (req, res) => {
       });
     }
 
+    // Validate media if present
+    if (media && !Array.isArray(media)) {
+      return res.status(400).json({
+        success: false,
+        message: "Media must be an array",
+      });
+    }
+
     // Create post
     const postData = {
       userId,
       title: title.trim(),
       content: content.trim(),
       tags: tags || [],
+      media: media || []
     };
 
     const newPost = await Post.create(postData);
+
+    console.log('Post created successfully:', newPost.postId);
 
     // Add post ID to user's postIds
     await User.addPost(userId, newPost.postId);
@@ -48,7 +60,8 @@ export const createPost = async (req, res) => {
       data: newPost,
     });
   } catch (err) {
-    console.error("Error in createPost:", err.message);
+    console.error("Error in createPost:", err);
+    console.error("Error stack:", err.stack);
     res.status(500).json({
       success: false,
       message: "Failed to create post",
@@ -64,6 +77,7 @@ export const getAllPosts = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const sortBy = req.query.sortBy || "createdAt";
     const order = req.query.order === "asc" ? 1 : -1;
+    const userId = req.user?.userId || null; // Get userId if authenticated
 
     // Validate pagination
     if (page < 1 || limit < 1 || limit > 100) {
@@ -73,7 +87,7 @@ export const getAllPosts = async (req, res) => {
       });
     }
 
-    const result = await Post.getAllPosts(page, limit, sortBy, order);
+    const result = await Post.getAllPosts(page, limit, sortBy, order, userId);
 
     res.status(200).json({
       success: true,
@@ -91,10 +105,10 @@ export const getAllPosts = async (req, res) => {
   }
 };
 
-// Get a single post by ID
 export const getPostById = async (req, res) => {
   try {
     const { postId } = req.params;
+    const userId = req.user?.userId || null; // Get userId if authenticated
 
     const post = await Post.findByPostId(postId);
 
@@ -105,13 +119,20 @@ export const getPostById = async (req, res) => {
       });
     }
 
+    // Populate user data
+    const populatedPosts = await Post.populateUserData([post]);
+    
+    // Populate vote data for the current user
+    const postsWithVotes = await Post.populateVoteData(populatedPosts, userId);
+    const populatedPost = postsWithVotes[0];
+
     // Increment view count
     await Post.incrementViewCount(postId);
 
     res.status(200).json({
       success: true,
       message: "Post retrieved successfully",
-      data: post,
+      data: populatedPost,
     });
   } catch (err) {
     console.error("Error in getPostById:", err.message);
@@ -123,7 +144,7 @@ export const getPostById = async (req, res) => {
   }
 };
 
-// Get posts by user ID
+// Get posts by user ID - UPDATED VERSION
 export const getPostsByUserId = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -149,10 +170,13 @@ export const getPostsByUserId = async (req, res) => {
 
     const result = await Post.getPostsByUserId(userId, page, limit);
 
+    // Populate user data
+    const populatedPosts = await Post.populateUserData(result.posts);
+
     res.status(200).json({
       success: true,
       message: "User posts retrieved successfully",
-      data: result.posts,
+      data: populatedPosts,
       pagination: result.pagination,
     });
   } catch (err) {
@@ -168,10 +192,11 @@ export const getPostsByUserId = async (req, res) => {
 // Search posts
 export const searchPosts = async (req, res) => {
   try {
-    const { q } = req.query;
+    const { q, sortBy = "relevance" } = req.query;
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
 
+    // Validate query
     if (!q || q.trim().length < 2) {
       return res.status(400).json({
         success: false,
@@ -187,7 +212,11 @@ export const searchPosts = async (req, res) => {
       });
     }
 
-    const result = await Post.searchPosts(q.trim(), page, limit);
+    // Validate sortBy
+    const validSortOptions = ["relevance", "recent", "popular"];
+    const finalSortBy = validSortOptions.includes(sortBy) ? sortBy : "relevance";
+    
+    const result = await Post.searchPosts(q.trim(), page, limit, finalSortBy);
 
     res.status(200).json({
       success: true,
@@ -195,9 +224,31 @@ export const searchPosts = async (req, res) => {
       data: result.posts,
       pagination: result.pagination,
       query: q.trim(),
+      sortBy: finalSortBy
     });
   } catch (err) {
     console.error("Error in searchPosts:", err.message);
+
+    // If text index error, try regex fallback
+    if(err.message.includes("text index")) {
+      console.log("Text index not found, using regex search as fallback.");
+      try {
+        const { q } = req.query;
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const result = await Post.regexSearchPosts(q.trim(), page, limit);
+        return res.status(200).json({
+          success: true,
+          message: "Search results retrieved successfully (regex mode)",
+          data: result.posts,
+          pagination: result.pagination,
+          query: q.trim()
+        });
+      } catch (regexErr) {
+        console.error("Regex search also failed:", regexErr.message);
+      }
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to search posts",
@@ -332,6 +383,7 @@ export const deletePost = async (req, res) => {
 export const upvotePost = async (req, res) => {
   try {
     const { postId } = req.params;
+    const userId = req.user.userId; // From your auth middleware
 
     // Check if post exists
     const post = await Post.findByPostId(postId);
@@ -342,26 +394,29 @@ export const upvotePost = async (req, res) => {
       });
     }
 
-    const upvoted = await Post.upvote(postId);
+    const result = await Vote.handleUpvote(postId, userId);
 
-    if (upvoted) {
+    if (result.success) {
       const updatedPost = await Post.findByPostId(postId);
       res.status(200).json({
         success: true,
-        message: "Post upvoted successfully",
+        message: `Post ${result.action.replace(/_/g, ' ')}`,
         data: {
           postId,
           upvotes: updatedPost.upvotes,
+          downvotes: updatedPost.downvotes,
+          userVote: result.newVote,
+          action: result.action,
         },
       });
     } else {
-      throw new Error("Failed to upvote post");
+      throw new Error("Failed to process upvote");
     }
   } catch (err) {
     console.error("Error in upvotePost:", err.message);
     res.status(500).json({
       success: false,
-      message: "Failed to upvote post",
+      message: "Failed to process upvote",
       error: err.message,
     });
   }
@@ -371,6 +426,7 @@ export const upvotePost = async (req, res) => {
 export const downvotePost = async (req, res) => {
   try {
     const { postId } = req.params;
+    const userId = req.user.userId; // From your auth middleware
 
     // Check if post exists
     const post = await Post.findByPostId(postId);
@@ -381,26 +437,29 @@ export const downvotePost = async (req, res) => {
       });
     }
 
-    const downvoted = await Post.downvote(postId);
+    const result = await Vote.handleDownvote(postId, userId);
 
-    if (downvoted) {
+    if (result.success) {
       const updatedPost = await Post.findByPostId(postId);
       res.status(200).json({
         success: true,
-        message: "Post downvoted successfully",
+        message: `Post ${result.action.replace(/_/g, ' ')}`,
         data: {
           postId,
+          upvotes: updatedPost.upvotes,
           downvotes: updatedPost.downvotes,
+          userVote: result.newVote,
+          action: result.action,
         },
       });
     } else {
-      throw new Error("Failed to downvote post");
+      throw new Error("Failed to process downvote");
     }
   } catch (err) {
     console.error("Error in downvotePost:", err.message);
     res.status(500).json({
       success: false,
-      message: "Failed to downvote post",
+      message: "Failed to process downvote",
       error: err.message,
     });
   }

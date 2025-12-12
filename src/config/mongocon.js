@@ -52,4 +52,9 @@ async function feedebackCollection() {
   return database.collection(process.env.FEEDBACKS_TABLE_NAME);
 }
 
-export default { connectDB, usersCollection, postsCollection, commentsCollection ,feedebackCollection};
+async function postvoteCollection() {
+  const database = await connectDB();
+  return database.collection(process.env.POSTVOTE_TABLE_NAME);
+}
+
+export default { connectDB, usersCollection, postsCollection, commentsCollection, postvoteCollection, feedebackCollection};

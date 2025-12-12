@@ -1,0 +1,9 @@
+export const USER_UPDATE= 5; //per hour
+export const USER_LOGIN= 5; //per hour
+export const MEDIA_UPLOAD= 10; //per hour
+export const COMMENT_UPDATE= 20; //per hour
+export const COMMENT_CREATE= 20; //per hour
+export const VOTING = 10; //per minute
+export const POST_UPDATE= 10; //per hour
+export const POST_CREATE= 10; //per hour
+export const FEEDBACK= 1; //per hour

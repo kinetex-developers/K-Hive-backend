@@ -9,11 +9,14 @@ import {
   deletePost,
   upvotePost,
   downvotePost,
-  togglePinPost,
-  toggleLockPost,
 } from "../controllers/postController.js";
 import { isAuthenticated, attachUser } from "../middleware/authMiddleware.js";
 import moderation from "../middleware/moderation.js";
+import {
+  postCreationRateLimit,
+  postUpdateRateLimit,
+  votingRateLimit
+} from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
 
@@ -24,16 +27,12 @@ router.get("/user/:userId", attachUser, getPostsByUserId);
 router.get("/:postId", attachUser, getPostById);
 
 // Protected routes (require authentication)
-router.post("/", isAuthenticated, moderation, createPost);
-router.put("/:postId", isAuthenticated, moderation, updatePost);
+router.post("/", isAuthenticated, postCreationRateLimit, moderation, createPost);
+router.put("/:postId", isAuthenticated, postUpdateRateLimit, moderation, updatePost);
 router.delete("/:postId", isAuthenticated, deletePost);
 
 // Voting routes (require authentication)
-router.post("/:postId/upvote", isAuthenticated, upvotePost);
-router.post("/:postId/downvote", isAuthenticated, downvotePost);
-
-// Admin routes (admin middleware needed)
-// router.patch("/:postId/pin", isAuthenticated, togglePinPost);
-// router.patch("/:postId/lock", isAuthenticated, toggleLockPost);
+router.patch("/upvote/:postId", isAuthenticated, votingRateLimit, upvotePost);
+router.patch("/downvote/:postId", isAuthenticated, votingRateLimit, downvotePost);
 
 export default router;
