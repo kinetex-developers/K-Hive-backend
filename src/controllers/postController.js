@@ -23,10 +23,10 @@ export const createPost = async (req, res) => {
       });
     }
 
-    if (content.length < 10) {
+    if (content.length < 10 || content.length > 5000) {
       return res.status(400).json({
         success: false,
-        message: "Content must be at least 10 characters",
+        message: "Content must be between 10 and 5000 characters",
       });
     }
 
@@ -317,10 +317,10 @@ export const updatePost = async (req, res) => {
     }
 
     if (content !== undefined) {
-      if (content.length < 10) {
+      if (content.length < 10 || content.length > 5000) {
         return res.status(400).json({
           success: false,
-          message: "Content must be at least 10 characters",
+          message: "Content must be between 10 and 5000 characters",
         });
       }
       updateData.content = content.trim();
