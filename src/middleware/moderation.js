@@ -6,6 +6,10 @@ import {
 
 import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
 
+import {moderateImage} from "../utils/ImageModeration.js";
+
+import { deleteFileByUrl } from "../config/imagekitcon.js";
+
 const matcher = new RegExpMatcher({
   ...englishDataset.build(),
   ...englishRecommendedTransformers,
@@ -38,7 +42,7 @@ Input to moderate:`;
 
 export default async function moderation(req, res, next) {
   try {
-    const { title = "", content = "" , tags=[]} = req.body;
+    const { title = "", content = "" , tags=[], media} = req.body;
 
     if(tags.length>5)
     {
@@ -125,7 +129,20 @@ export default async function moderation(req, res, next) {
             category: result.harm_type
           });
         }
-        
+        if(media && media.length>0){
+          for(const item of media){
+            const isSafe = await moderateImage(item);
+            if(!isSafe){
+              for(const ditem of media){
+                  await deleteFileByUrl(ditem);
+              }
+              return res.status(400).json({
+                success: false,
+                message: "One or more images violate community guidelines"
+              });
+            }
+          }
+        }
         console.log("Content passed AI moderation");
         
       } catch (aiError) {
