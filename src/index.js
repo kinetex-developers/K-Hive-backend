@@ -15,6 +15,7 @@ import createSearchIndexes from "./config/createIndexes.js";
 import searchRoutes from './routes/searchRoutes.js'; 
 import adminRoutes from './routes/adminRoutes.js';
 import userRoutes from './routes/userRoutes.js';
+import feedbackRoutes from './routes/feedbackRoutes.js';
 import PrefixSearchService from './services/prefixSearchService.js';
 
 const app = express();
@@ -92,6 +93,7 @@ app.use('/api/media', mediaRoutes);
 app.use('/api/admin', adminRoutes);
 app.use("/api/users", userRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/api/feedback', feedbackRoutes);
 
 // Error handling middleware (must be last)
 app.use(errorHandler);
