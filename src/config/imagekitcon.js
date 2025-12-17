@@ -106,3 +106,19 @@ export async function deleteFileByUrl(fileUrl) {
     return false;
   }
 }
+
+export async function deleteFileById(fileId) {
+  const imagekitInstance = getImageKitInstance();
+  
+  if (!imagekitInstance) {
+    return false;
+  }
+
+  try {
+    await imagekitInstance.deleteFile(fileId);
+    return true;
+  } catch (err) {
+    console.error(`Error deleting file ${fileId}:`, err.message);
+    return false;
+  }
+}

@@ -8,7 +8,7 @@ import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/ge
 
 import {moderateImage} from "../utils/ImageModeration.js";
 
-import { deleteFileByUrl } from "../config/imagekitcon.js";
+import {deleteFileById} from "../config/imagekitcon.js";
 
 const matcher = new RegExpMatcher({
   ...englishDataset.build(),
@@ -42,10 +42,12 @@ Input to moderate:`;
 
 export default async function moderation(req, res, next) {
   try {
-    const { title = "", content = "" , tags=[], media} = req.body;
+    const { title = "", content = "" , tags=[], media, mediaId} = req.body;
 
-    if(tags.length>5)
-    {
+    if(tags.length > 5) {
+      if (mediaId && mediaId.length > 0) {
+            deleteFilesByID(mediaId);
+          }
       return res.status(400).json({
         success: false,
         message: "Too many tags"
@@ -53,14 +55,19 @@ export default async function moderation(req, res, next) {
     }
 
     for(const tag of tags){
-      if(tag.length<2 || tag.length>20)
-      {
+      if (mediaId && mediaId.length > 0) {
+            deleteFilesByID(mediaId);
+          }
+      if(tag.length < 2 || tag.length > 20) {
         return res.status(400).json({
-        success: false,
-        message: "Use tags of length 2..20"
-      });
+          success: false,
+          message: "Use tags of length 2..20"
+        });
       }
       if (matcher.hasMatch(tag)) {
+        if (mediaId && mediaId.length > 0) {
+            deleteFilesByID(mediaId);
+          }
         return res.status(400).json({
           success: false,
           message: "Your tags contain inappropriate language."
@@ -70,6 +77,9 @@ export default async function moderation(req, res, next) {
     
     const text = (title + " " + content).trim();
     if (!text || text.length < 3) {
+      if (mediaId && mediaId.length > 0) {
+            deleteFilesByID(mediaId);
+          }
       return res.status(400).json({
         success: false,
         message: "Content is too short."
@@ -78,22 +88,23 @@ export default async function moderation(req, res, next) {
 
     // First check: Profanity filter
     if (matcher.hasMatch(text)) {
+      if (mediaId && mediaId.length > 0) {
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "Your post contains inappropriate language."
       });
     }
 
-    // Second check: AI moderation
+    // Second check: AI text moderation
     if (process.env.USE_AI_MODERATION === "true") {
-
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash", // Fast and cheap
+        model: "gemini-2.5-flash",
         generationConfig: {
-          temperature: 0, // Best practice for classification
+          temperature: 0,
           responseMimeType: "application/json",
         },
-        // Turn OFF safety filters as per documentation
         safetySettings: [
           {
             category: HarmCategory.HARM_CATEGORY_HARASSMENT,
@@ -119,42 +130,61 @@ export default async function moderation(req, res, next) {
         const response = await model.generateContent(prompt);
         const resultText = response.response.text();
         
-        // Parse JSON response
         const result = JSON.parse(resultText);
         
         if (result.violation === "yes") {
+          if (mediaId && mediaId.length > 0) {
+            deleteFilesByID(mediaId);
+          }
           return res.status(400).json({
             success: false,
             message: "Your post violates community guidelines",
             category: result.harm_type
           });
         }
-        if(media && media.length>0){
-          for(const item of media){
-            const isSafe = await moderateImage(item);
-            if(!isSafe){
-              for(const ditem of media){
-                  await deleteFileByUrl(ditem);
-              }
-              return res.status(400).json({
-                success: false,
-                message: "One or more images violate community guidelines"
-              });
-            }
-          }
-        }
-        console.log("Content passed AI moderation");
         
       } catch (aiError) {
         console.error("AI Moderation error:", aiError);
       }
     }
     
-    // Passed all checks
+    // Third check: Image moderation
+    if(media && media.length > 0) {
+      for(const item of media){
+        const isSafe = await moderateImage(item);
+        
+        if(!isSafe) {
+          if (mediaId && mediaId.length > 0) {
+            deleteFilesByID(mediaId);
+          }
+          return res.status(400).json({
+            success: false,
+            message: "One or more images violate community guidelines"
+          });
+        }
+      }
+    }
+    
     next();
   } catch (err) {
     console.error("Moderation error:", err);
-    // Let request pass if moderation crashes
+    if (req.body.mediaId && req.body.mediaId.length > 0) {
+      await deleteFilesByID(req.body.mediaId);
+    }
     next();
+  }
+}
+
+async function deleteFilesByID(mediaIds) {
+  if (!mediaIds || !Array.isArray(mediaIds)) {
+    return;
+  }
+  
+  for (const fileId of mediaIds) {
+    try {
+      await deleteFileById(fileId);
+    } catch (error) {
+      console.error(`Error deleting file ${fileId}:`, error);
+    }
   }
 }
