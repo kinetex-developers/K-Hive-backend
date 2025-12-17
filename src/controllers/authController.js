@@ -7,6 +7,8 @@ import {
   clearTokenCookies,
   verifyRefreshToken,
 } from "../utils/jwtUtils.js";
+
+import{validateUsername}from "../utils/username.js";
 import User from "../models/User.js";
 
 // Google authentication callback handler
@@ -152,18 +154,12 @@ export const updateUser = async (req, res) => {
       });
     }
 
+    const valuname=validateUsername(name)
     // Validate name
-    if (typeof name !== 'string' || name.trim().length < 2) {
+    if (!valuname.valid) {
       return res.status(400).json({
         success: false,
-        message: "Name must be at least 2 characters",
-      });
-    }
-
-    if (name.trim().length > 100) {
-      return res.status(400).json({
-        success: false,
-        message: "Name must not exceed 100 characters",
+        message: valuname.reason,
       });
     }
 
@@ -197,6 +193,34 @@ export const updateUser = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update user",
+      error: err.message,
+    });
+  }
+};
+
+// Delete User
+export const deleteUser = async (req, res) => {
+  try {
+    const userId = req.user.userId; // Get userId from authenticated user
+
+    const del = await User.deleteUser(userId);
+
+    if (!del) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "User deleted successfully",
+    });
+  } catch (err) {
+    console.error("Error in deleteUser:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete user",
       error: err.message,
     });
   }

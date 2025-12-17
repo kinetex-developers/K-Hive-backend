@@ -5,7 +5,10 @@ import {
 } from "obscenity";
 
 import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
-import OpenAI from "openai";
+
+import {moderateImage} from "../utils/ImageModeration.js";
+
+import { deleteFileByUrl } from "../config/imagekitcon.js";
 
 const matcher = new RegExpMatcher({
   ...englishDataset.build(),
@@ -13,9 +16,6 @@ const matcher = new RegExpMatcher({
 });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
 
 const MODERATION_PROMPT = `You are a content moderator for a university forum. Your task is to analyze the provided input and classify it based on the following harm types:
 
@@ -40,90 +40,35 @@ If you are unsure, default to "no" violation.
 
 Input to moderate:`;
 
-// OpenAI Moderation Function
-async function checkOpenAIModeration(text) {
-  try {
-    const moderation = await openai.moderations.create({
-      model: "omni-moderation-latest",
-      input: text,
-    });
-
-    const result = moderation.results[0];
-    
-    if (result.flagged) {
-      // Find the category with highest score
-      const flaggedCategories = Object.entries(result.categories)
-        .filter(([_, flagged]) => flagged)
-        .map(([category]) => category);
-      
-      return {
-        violation: true,
-        category: flaggedCategories[0] || "inappropriate_content",
-        scores: result.category_scores
-      };
-    }
-    
-    return { violation: false };
-  } catch (error) {
-    console.error("OpenAI Moderation error:", error);
-    throw error;
-  }
-}
-
-// Gemini Moderation Function
-async function checkGeminiModeration(text) {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash-exp",
-    generationConfig: {
-      temperature: 0,
-      responseMimeType: "application/json",
-    },
-    safetySettings: [
-      {
-        category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-      },
-      {
-        category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-        threshold: HarmBlockThreshold.BLOCK_NONE,
-      }
-    ]
-  });
-
-  try {
-    const prompt = `${MODERATION_PROMPT}\n\n${text}`;
-    const response = await model.generateContent(prompt);
-    const resultText = response.response.text();
-    const result = JSON.parse(resultText);
-    
-    if (result.violation === "yes") {
-      return {
-        violation: true,
-        category: result.harm_type,
-        reasoning: result.reasoning
-      };
-    }
-    
-    return { violation: false };
-  } catch (error) {
-    console.error("Gemini Moderation error:", error);
-    throw error;
-  }
-}
-
 export default async function moderation(req, res, next) {
   try {
-    const { title = "", content = "" } = req.body;
-    const text = (title + " " + content).trim();
+    const { title = "", content = "" , tags=[], media} = req.body;
 
+    if(tags.length>5)
+    {
+      return res.status(400).json({
+        success: false,
+        message: "Too many tags"
+      });
+    }
+
+    for(const tag of tags){
+      if(tag.length<2 || tag.length>20)
+      {
+        return res.status(400).json({
+        success: false,
+        message: "Use tags of length 2..20"
+      });
+      }
+      if (matcher.hasMatch(tag)) {
+        return res.status(400).json({
+          success: false,
+          message: "Your tags contain inappropriate language."
+        });
+      }
+    }
+    
+    const text = (title + " " + content).trim();
     if (!text || text.length < 3) {
       return res.status(400).json({
         success: false,
@@ -139,37 +84,69 @@ export default async function moderation(req, res, next) {
       });
     }
 
-    // Second check: AI moderation (toggleable)
+    // Second check: AI moderation
     if (process.env.USE_AI_MODERATION === "true") {
-      const provider = process.env.MODERATION_PROVIDER || "gemini"; // Default to gemini
-      
+
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash", // Fast and cheap
+        generationConfig: {
+          temperature: 0, // Best practice for classification
+          responseMimeType: "application/json",
+        },
+        // Turn OFF safety filters as per documentation
+        safetySettings: [
+          {
+            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            threshold: HarmBlockThreshold.BLOCK_NONE,
+          }
+        ]
+      });
+
       try {
-        let moderationResult;
+        const prompt = `${MODERATION_PROMPT}\n\n${text}`;
+        const response = await model.generateContent(prompt);
+        const resultText = response.response.text();
         
-        if (provider === "openai") {
-          console.log("Using OpenAI moderation");
-          moderationResult = await checkOpenAIModeration(text);
-        } else if (provider === "gemini") {
-          console.log("Using Gemini moderation");
-          moderationResult = await checkGeminiModeration(text);
-        } else {
-          console.warn(`Unknown moderation provider: ${provider}. Defaulting to Gemini.`);
-          moderationResult = await checkGeminiModeration(text);
-        }
+        // Parse JSON response
+        const result = JSON.parse(resultText);
         
-        if (moderationResult.violation) {
+        if (result.violation === "yes") {
           return res.status(400).json({
             success: false,
             message: "Your post violates community guidelines",
-            category: moderationResult.category
+            category: result.harm_type
           });
         }
-        
-        console.log(`Content passed ${provider.toUpperCase()} moderation`);
+        if(media && media.length>0){
+          for(const item of media){
+            const isSafe = await moderateImage(item);
+            if(!isSafe){
+              for(const ditem of media){
+                  await deleteFileByUrl(ditem);
+              }
+              return res.status(400).json({
+                success: false,
+                message: "One or more images violate community guidelines"
+              });
+            }
+          }
+        }
+        console.log("Content passed AI moderation");
         
       } catch (aiError) {
         console.error("AI Moderation error:", aiError);
-        // Continue to next() if moderation fails
       }
     }
     

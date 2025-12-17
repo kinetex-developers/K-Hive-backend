@@ -3,6 +3,10 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as JwtStrategy, ExtractJwt } from "passport-jwt";
 import User from "../models/User.js";
 import {loginRateLimit} from "../middleware/rateLimitMiddleware.js";
+import{
+  validateUsername,
+  generateUsername
+}from "../utils/username.js";
 // Google OAuth Strategy
 passport.use(
   new GoogleStrategy(
@@ -15,8 +19,12 @@ passport.use(
     async (accessToken, refreshToken, profile, done) => {
       try {
         // Extract user data from Google profile
+
+        let uname=profile.displayName
+        if(!validateUsername(uname).valid)
+        {uname=generateUsername()}
         const userData = {
-          name: profile.displayName,
+          name: uname,
           gmailId: profile.emails[0].value,
           avatarLink: profile.photos[0]?.value || null,
         };

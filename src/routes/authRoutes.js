@@ -8,6 +8,7 @@ import {
   checkAuth,
   refreshToken,
   updateUser,
+  deleteUser,
 } from "../controllers/authController.js";
 import {
   userUpdateRateLimit
@@ -35,6 +36,8 @@ router.get(
 );
 
 router.get("/user", isAuthenticated, getCurrentUser);
+
+router.delete("/user", isAuthenticated, deleteUser);
 
 router.put("/user", isAuthenticated, userUpdateRateLimit, updateUser);
 
