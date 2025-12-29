@@ -104,10 +104,12 @@ app.use((req, res) => {
 });
 
 // Start server
-// app.listen(PORT, () => {
-//   console.log(`KIIT Forum server running on port ${PORT}`);
-//   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-// });
+if (!(process.env.NODE_ENV === "production")) {
+  app.listen(PORT, () => {
+    console.log(`KIIT Forum server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  });
+}
 
 export default app;
 

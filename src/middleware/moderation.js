@@ -26,8 +26,6 @@ const MODERATION_PROMPT = `You are a content moderator for a university forum. Y
 * Toxic: Rude, disrespectful, or unreasonable language.
 * Violent: Depicts violence, gore, or harm against individuals or groups.
 * Profanity: Obscene or vulgar language.
-* Spam: Promotional content, repetitive posts, or irrelevant content.
-* Academic Misconduct: Requests for cheating, plagiarism, or sharing exam answers.
 
 Output should be in JSON format only, no other text:
 {
