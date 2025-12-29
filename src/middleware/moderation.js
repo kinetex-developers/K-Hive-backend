@@ -10,6 +10,8 @@ import {moderateImage} from "../utils/ImageModeration.js";
 
 import {deleteFileById} from "../config/imagekitcon.js";
 
+import { isLinkExplicit } from "../services/urlModerationService.js";
+
 const matcher = new RegExpMatcher({
   ...englishDataset.build(),
   ...englishRecommendedTransformers,
@@ -122,14 +124,13 @@ export default async function moderation(req, res, next) {
           }
         ]
       });
-
+      
       try {
         const prompt = `${MODERATION_PROMPT}\n\n${text}`;
         const response = await model.generateContent(prompt);
         const resultText = response.response.text();
         
         const result = JSON.parse(resultText);
-        
         if (result.violation === "yes") {
           if (mediaId && mediaId.length > 0) {
             deleteFilesByID(mediaId);
@@ -145,7 +146,15 @@ export default async function moderation(req, res, next) {
         console.error("AI Moderation error:", aiError);
       }
     }
-    
+
+    if(await isLinkExplicit(text))
+    {
+      return res.status(400).json({
+        success: false,
+        message: "One or more links violate community guidelines"
+      });
+    }
+
     // Third check: Image moderation
     if(media && media.length > 0) {
       for(const item of media){
