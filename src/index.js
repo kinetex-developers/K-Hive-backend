@@ -104,7 +104,7 @@ app.use((req, res) => {
 });
 
 // Start server
-if (!(process.env.NODE_ENV === "production")) {
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`KIIT Forum server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
