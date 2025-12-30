@@ -78,4 +78,4 @@ IN NO EVENT SHALL KINETEX LABS OR THE ORIGINAL AUTHORS BE LIABLE FOR ANY CLAIM, 
 For commercial use, distribution, or any use beyond Personal Use, contact:
 
 **Kinetex Labs**
-(official contact to be provided by the rights holder)
+kinetex.society@gmail.com
