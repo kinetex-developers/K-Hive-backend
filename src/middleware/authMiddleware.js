@@ -1,5 +1,5 @@
 import passport from "passport";
-
+import User from "../models/User.js"
 // JWT Authentication Middleware
 export const isAuthenticated = (req, res, next) => {
   passport.authenticate('jwt', { session: false }, (err, user, info) => {
@@ -17,6 +17,12 @@ export const isAuthenticated = (req, res, next) => {
       });
     }
     
+    if(user.role.endsWith("-ban")){
+      return res.status(401).json({
+        success: false,
+        message: "You have been Banned.",
+      });
+    }
     req.user = user;
     next();
   })(req, res, next);
