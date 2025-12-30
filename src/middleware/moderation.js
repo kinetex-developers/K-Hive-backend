@@ -5,11 +5,10 @@ import {
 } from "obscenity";
 
 import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/generative-ai";
+import OpenAI from "openai";
 
 import {moderateImage} from "../utils/ImageModeration.js";
-
 import {deleteFileById} from "../config/imagekitcon.js";
-
 import { isLinkExplicit } from "../services/urlModerationService.js";
 
 const matcher = new RegExpMatcher({
@@ -18,6 +17,12 @@ const matcher = new RegExpMatcher({
 });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+// Initialize Perplexity client
+const perplexityClient = new OpenAI({
+  apiKey: process.env.PERPLEXITY_API_KEY,
+  baseURL: 'https://api.perplexity.ai',
+});
 
 const MODERATION_PROMPT = `You are a content moderator for a university forum. Your task is to analyze the provided input and classify it based on the following harm types:
 
@@ -40,14 +45,88 @@ If you are unsure, default to "no" violation.
 
 Input to moderate:`;
 
+// AI moderation with Perplexity (primary) and Gemini (fallback)
+async function aiModeration(text) {
+  // Try Perplexity first
+  if (process.env.PERPLEXITY_API_KEY) {
+    try {
+      const completion = await perplexityClient.chat.completions.create({
+        model: 'sonar-small-online',
+        messages: [
+          {
+            role: 'system',
+            content: MODERATION_PROMPT
+          },
+          { 
+            role: 'user', 
+            content: text 
+          }
+        ],
+        temperature: 0,
+        max_tokens: 100,
+        response_format: { type: 'json_object' }
+      });
+
+      const result = JSON.parse(completion.choices[0].message.content);
+      console.log('Perplexity moderation result:', result);
+      return result;
+      
+    } catch (perplexityError) {
+      console.error("Perplexity moderation error:", perplexityError.message);
+      console.log("Falling back to Gemini...");
+    }
+  }
+
+  // Fallback to Gemini
+  try {
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: "application/json",
+      },
+      safetySettings: [
+        {
+          category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.BLOCK_NONE,
+        }
+      ]
+    });
+    
+    const prompt = `${MODERATION_PROMPT}\n\n${text}`;
+    const response = await model.generateContent(prompt);
+    const resultText = response.response.text();
+    
+    const result = JSON.parse(resultText);
+    console.log('Gemini moderation result:', result);
+    return result;
+    
+  } catch (geminiError) {
+    console.error("Gemini moderation error:", geminiError);
+    throw new Error("Both AI moderation services failed");
+  }
+}
+
 export default async function moderation(req, res, next) {
   try {
     const { title = "", content = "" , tags=[], media, mediaId} = req.body;
 
     if(tags.length > 5) {
       if (mediaId && mediaId.length > 0) {
-            deleteFilesByID(mediaId);
-          }
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "Too many tags"
@@ -55,10 +134,10 @@ export default async function moderation(req, res, next) {
     }
 
     for(const tag of tags){
-      if (mediaId && mediaId.length > 0) {
-            deleteFilesByID(mediaId);
-          }
       if(tag.length < 2 || tag.length > 20) {
+        if (mediaId && mediaId.length > 0) {
+          deleteFilesByID(mediaId);
+        }
         return res.status(400).json({
           success: false,
           message: "Use tags of length 2..20"
@@ -66,8 +145,8 @@ export default async function moderation(req, res, next) {
       }
       if (matcher.hasMatch(tag)) {
         if (mediaId && mediaId.length > 0) {
-            deleteFilesByID(mediaId);
-          }
+          deleteFilesByID(mediaId);
+        }
         return res.status(400).json({
           success: false,
           message: "Your tags contain inappropriate language."
@@ -78,8 +157,8 @@ export default async function moderation(req, res, next) {
     const text = (title + " " + content).trim();
     if (!text || text.length < 3) {
       if (mediaId && mediaId.length > 0) {
-            deleteFilesByID(mediaId);
-          }
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "Content is too short."
@@ -97,40 +176,11 @@ export default async function moderation(req, res, next) {
       });
     }
 
-    // Second check: AI text moderation
+    // Second check: AI text moderation (Perplexity with Gemini fallback)
     if (process.env.USE_AI_MODERATION === "true") {
-      const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: "application/json",
-        },
-        safetySettings: [
-          {
-            category: HarmCategory.HARM_CATEGORY_HARASSMENT,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          },
-          {
-            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-            threshold: HarmBlockThreshold.BLOCK_NONE,
-          }
-        ]
-      });
-      
       try {
-        const prompt = `${MODERATION_PROMPT}\n\n${text}`;
-        const response = await model.generateContent(prompt);
-        const resultText = response.response.text();
+        const result = await aiModeration(text);
         
-        const result = JSON.parse(resultText);
         if (result.violation === "yes") {
           if (mediaId && mediaId.length > 0) {
             deleteFilesByID(mediaId);
@@ -143,19 +193,22 @@ export default async function moderation(req, res, next) {
         }
         
       } catch (aiError) {
-        console.error("AI Moderation error:", aiError);
+        console.error("AI Moderation failed completely:", aiError);
       }
     }
 
-    if(await isLinkExplicit(text))
-    {
+    // Third check: Link moderation
+    if(await isLinkExplicit(text)) {
+      if (mediaId && mediaId.length > 0) {
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "One or more links violate community guidelines"
       });
     }
 
-    // Third check: Image moderation
+    // Fourth check: Image moderation
     if(media && media.length > 0) {
       for(const item of media){
         const isSafe = await moderateImage(item);
