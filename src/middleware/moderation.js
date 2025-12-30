@@ -8,7 +8,7 @@ import { GoogleGenerativeAI, HarmBlockThreshold, HarmCategory } from "@google/ge
 import OpenAI from "openai";
 
 import {moderateImage} from "../utils/ImageModeration.js";
-import {deleteFileById} from "../config/imagekitcon.js";
+import {deleteFilesByID} from "../config/imagekitcon.js";
 import { isLinkExplicit } from "../services/urlModerationService.js";
 
 const matcher = new RegExpMatcher({
@@ -51,7 +51,7 @@ async function aiModeration(text) {
   if (process.env.PERPLEXITY_API_KEY) {
     try {
       const completion = await perplexityClient.chat.completions.create({
-        model: 'sonar-small-online',
+        model: 'sonar',
         messages: [
           {
             role: 'system',
@@ -63,11 +63,24 @@ async function aiModeration(text) {
           }
         ],
         temperature: 0,
-        max_tokens: 100,
-        response_format: { type: 'json_object' }
+        max_tokens: 100
       });
-
-      const result = JSON.parse(completion.choices[0].message.content);
+      const responseText = completion.choices[0].message.content.trim();
+      
+      // Remove markdown code blocks and extra whitespace
+      let cleanedResponse = responseText
+        .replace(/```json\s*/g, '')  // Remove ```json
+        .replace(/```\s*/g, '')      // Remove ```
+        .replace(/`/g, '')           // Remove any stray backticks
+        .trim();
+      
+      // Try to find JSON object if there's extra text
+      const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanedResponse = jsonMatch[0];
+      }
+      
+      const result = JSON.parse(cleanedResponse);
       console.log('Perplexity moderation result:', result);
       return result;
       
@@ -155,7 +168,7 @@ export default async function moderation(req, res, next) {
     }
     
     const text = (title + " " + content).trim();
-    if (!text || text.length < 3) {
+    if (!text) {
       if (mediaId && mediaId.length > 0) {
         deleteFilesByID(mediaId);
       }
@@ -232,19 +245,5 @@ export default async function moderation(req, res, next) {
       await deleteFilesByID(req.body.mediaId);
     }
     next();
-  }
-}
-
-async function deleteFilesByID(mediaIds) {
-  if (!mediaIds || !Array.isArray(mediaIds)) {
-    return;
-  }
-  
-  for (const fileId of mediaIds) {
-    try {
-      await deleteFileById(fileId);
-    } catch (error) {
-      console.error(`Error deleting file ${fileId}:`, error);
-    }
   }
 }

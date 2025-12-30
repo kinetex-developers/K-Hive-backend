@@ -122,3 +122,17 @@ export async function deleteFileById(fileId) {
     return false;
   }
 }
+
+export async function deleteFilesByID(mediaIds) {
+  if (!mediaIds || !Array.isArray(mediaIds)) {
+    return;
+  }
+  
+  for (const fileId of mediaIds) {
+    try {
+      await deleteFileById(fileId);
+    } catch (error) {
+      console.error(`Error deleting file ${fileId}:`, error);
+    }
+  }
+}
