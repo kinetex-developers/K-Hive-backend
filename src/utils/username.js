@@ -79,9 +79,9 @@ export function validateUsername(username) {
     }
   }
 
-  const validPattern = /^[a-zA-Z0-9_-]+$/;
+  const validPattern = /^[a-zA-Z0-9_ -]+$/;
   if (!validPattern.test(username.trim())) {
-    return { valid: false, reason: 'Username can only contain letters, numbers, underscores, and hyphens' };
+    return { valid: false, reason: 'Username can only contain letters, numbers, spaces, underscores, and hyphens' };
   }
 
   return { valid: true, reason: 'Username is valid' };
