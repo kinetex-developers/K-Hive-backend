@@ -201,8 +201,7 @@ export const updateUser = async (req, res) => {
 // Delete User
 export const deleteUser = async (req, res) => {
   try {
-    const userId = req.user.userId; // Get userId from authenticated user
-
+    const userId = req.user.userId;
     const del = await User.deleteUser(userId);
 
     if (!del) {
@@ -211,6 +210,9 @@ export const deleteUser = async (req, res) => {
         message: "User not found",
       });
     }
+
+    // Clear authentication cookies before responding
+    clearTokenCookies(res);
 
     res.status(200).json({
       success: true,
