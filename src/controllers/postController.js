@@ -290,7 +290,7 @@ export const searchPosts = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Search results retrieved successfully",
-      data: result.posts,
+      data: populatedPosts,
       pagination: result.pagination,
       query: q.trim(),
       sortBy: finalSortBy
