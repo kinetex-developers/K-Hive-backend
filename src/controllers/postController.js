@@ -1,15 +1,19 @@
 import Post from "../models/Post.js";
 import User from "../models/User.js";
 import Vote from "../models/Vote.js";
+import {deleteFilesByID} from "../config/imagekitcon.js";
 
 // Create a new post
 export const createPost = async (req, res) => {
   try {
-    const { title, content, tags, media } = req.body;
+    const { title, content, tags, media, mediaId} = req.body;
     const userId = req.user.userId;
 
     // Validation
     if (!title || !content) {
+      if (mediaId && mediaId.length > 0) {
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "Title and content are required",
@@ -17,6 +21,9 @@ export const createPost = async (req, res) => {
     }
 
     if (title.length < 5 || title.length > 200) {
+      if (mediaId && mediaId.length > 0) {
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "Title must be between 5 and 200 characters",
@@ -24,6 +31,9 @@ export const createPost = async (req, res) => {
     }
 
     if (content.length < 10 || content.length > 5000) {
+      if (mediaId && mediaId.length > 0) {
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "Content must be between 10 and 5000 characters",
@@ -32,6 +42,9 @@ export const createPost = async (req, res) => {
 
     // Validate media if present
     if (media && !Array.isArray(media)) {
+      if (mediaId && mediaId.length > 0) {
+        deleteFilesByID(mediaId);
+      }
       return res.status(400).json({
         success: false,
         message: "Media must be an array",
@@ -62,6 +75,9 @@ export const createPost = async (req, res) => {
   } catch (err) {
     console.error("Error in createPost:", err);
     console.error("Error stack:", err.stack);
+    if (mediaId && mediaId.length > 0) {
+        deleteFilesByID(mediaId);
+      }
     res.status(500).json({
       success: false,
       message: "Failed to create post",
