@@ -3,6 +3,7 @@ import mongocon from "../config/mongocon.js";
 import rediscon from "../config/rediscon.js";
 import User from "./User.js"
 import Post from "./Post.js"
+import Report from "./Report.js"
 
 class Comment {
   constructor(data) {
@@ -620,6 +621,7 @@ static async getCommentsByUserId(userId, page = 1, limit = 20) {
       await rediscon.commentsCacheDel(commentId);
       Post.removeComment(postId)
       User.removeComment(userId)
+      Report.deleteReportsByDataId(commentId);
       return result.deletedCount > 0;
     } catch (err) {
       console.error("Error hard deleting comment:", err.message);

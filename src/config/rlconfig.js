@@ -7,3 +7,4 @@ export const VOTING = 10; //per minute
 export const POST_UPDATE= 10; //per hour
 export const POST_CREATE= 10; //per hour
 export const FEEDBACK= 1; //per hour
+export const REPORT_CREATE= 3; //per hour

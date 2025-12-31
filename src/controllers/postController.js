@@ -1,6 +1,7 @@
 import Post from "../models/Post.js";
 import User from "../models/User.js";
 import Vote from "../models/Vote.js";
+import Report from "../models/Report.js";
 import {deleteFilesByID} from "../config/imagekitcon.js";
 
 // Create a new post
@@ -531,6 +532,23 @@ export const downvotePost = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to process downvote",
+      error: err.message,
+    });
+  }
+};
+
+export const reportPost = async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const userId = req.user.userId; // From your auth middleware
+    console.log("Here");
+    const result = await Report.createReport("post", postId, userId);
+    res.status(200).json(result);
+  } catch (err) {
+    console.error("Error in reportPost:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to process report",
       error: err.message,
     });
   }

@@ -5,6 +5,7 @@ import { deleteFileByUrl } from "../config/imagekitcon.js";
 import User from "./User.js"
 import PrefixSearchService from '../services/prefixSearchService.js';
 import Vote from "./Vote.js"
+import Report from "./Report.js"
 import sentimentAnalysisService from '../utils/sentimentAnalyzer.js';
 
 class Post {
@@ -1153,6 +1154,7 @@ static async upvote(postId) {
       // Remove from user's posts
       await User.removePost(userId, postId);
       
+      await Report.deleteReportsByDataId(postId);
       // Remove from ALL feed caches
       await rediscon.feedCacheRemove(Post.getFeedCacheKey("createdAt", -1), postId);
       await rediscon.feedCacheRemove(Post.getFeedCacheKey("createdAt", 1), postId);

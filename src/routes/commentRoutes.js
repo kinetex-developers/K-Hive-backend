@@ -12,12 +12,14 @@ import {
   downvoteComment,
   getCommentCount,
   getReplyCount,
+  reportComment,
 } from "../controllers/commentController.js";
 import { isAuthenticated, attachUser } from "../middleware/authMiddleware.js";
 import moderation from "../middleware/moderation.js";
 import {
   commentCreationRateLimit,
-  commentUpdateRateLimit
+  commentUpdateRateLimit,
+  reportRateLimit,
 } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
@@ -34,6 +36,7 @@ router.get("/:commentId/replycount", attachUser, getReplyCount);
 router.post("/", isAuthenticated, commentCreationRateLimit, moderation, createComment);
 router.put("/:commentId", isAuthenticated, commentUpdateRateLimit, moderation, updateComment);
 router.delete("/:commentId", isAuthenticated, hardDeleteComment);
+router.get("/:commentId/report", isAuthenticated, reportRateLimit, reportComment);
 
 // Voting routes (require authentication)
 //router.post("/:commentId/upvote", isAuthenticated, upvoteComment);
