@@ -57,4 +57,9 @@ async function postvoteCollection() {
   return database.collection(process.env.POSTVOTE_TABLE_NAME);
 }
 
-export default { connectDB, usersCollection, postsCollection, commentsCollection, postvoteCollection, feedbackCollection};
+async function reportsCollection() {
+  const database = await connectDB();
+  return database.collection(process.env.REPORT_TABLE_NAME);
+}
+
+export default { connectDB, usersCollection, postsCollection, commentsCollection, postvoteCollection, feedbackCollection, reportsCollection};

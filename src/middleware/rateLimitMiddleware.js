@@ -8,6 +8,7 @@ import {
   checkLoginLimit,
   checkUserUpdateLimit,
   checkFeedbackLimit,
+  reportCreationLimit,
 } from "../config/redisRateLimitHandler.js";
 
 export async function postCreationRateLimit(req, res, next) {
@@ -32,6 +33,35 @@ export async function postCreationRateLimit(req, res, next) {
       });
     }
 
+    next();
+  } catch (err) {
+    console.error("Post creation rate limit error:", err.message);
+    // Fail open - allow the request if middleware fails
+    next();
+  }
+}
+
+export async function reportRateLimit(req, res, next) {
+  try {
+    const userId = req.user?.id || req.user?._id?.toString();
+    
+    if (!userId) {
+      return res.status(401).json({ 
+        success: false,
+        message: "Authentication required" 
+      });
+    }
+
+    const result = await reportCreationLimit(userId);
+    
+    if (!result.allowed) {
+      res.set("Retry-After", String(result.retryAfter));
+      return res.status(429).json({
+        success: false,
+        message: "Too many reports. Please try again later.",
+        retryAfter: result.retryAfter
+      });
+    }
     next();
   } catch (err) {
     console.error("Post creation rate limit error:", err.message);
@@ -285,4 +315,5 @@ export default {
   loginRateLimit,
   userUpdateRateLimit,
   feedbackRateLimit,
+  reportRateLimit,
 };

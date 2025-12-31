@@ -8,14 +8,16 @@ import {
   updatePost,
   deletePost,
   upvotePost,
-  downvotePost
+  downvotePost,
+  reportPost,
 } from "../controllers/postController.js";
 import { isAuthenticated, attachUser } from "../middleware/authMiddleware.js";
 import moderation from "../middleware/moderation.js";
 import {
   postCreationRateLimit,
   postUpdateRateLimit,
-  votingRateLimit
+  votingRateLimit,
+  reportRateLimit,
 } from "../middleware/rateLimitMiddleware.js";
 
 const router = express.Router();
@@ -34,5 +36,6 @@ router.delete("/:postId", isAuthenticated, deletePost);
 // Voting routes (require authentication)
 router.patch("/upvote/:postId", isAuthenticated, votingRateLimit, upvotePost);
 router.patch("/downvote/:postId", isAuthenticated, votingRateLimit, downvotePost);
+router.post("/:postId/report", isAuthenticated, reportRateLimit, reportPost);
 
 export default router;

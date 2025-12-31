@@ -10,6 +10,7 @@ import {
   POST_UPDATE, //per hour
   POST_CREATE, //per hour
   FEEDBACK, //per hour
+  REPORT_CREATE, //per hour
  } from './rlconfig.js';
 const rateLimitRedisUrl = process.env.RATE_LIMIT_REDIS_URL || process.env.REDIS_URL;
 
@@ -66,6 +67,25 @@ async function getRateLimiter() {
 
 function rateKey(userId, routeId) {
   return `user:${userId}:${routeId}`;
+}
+
+async function reportCreationLimit(userId) {
+  try {
+    const limiter = await getRateLimiter();
+    const key = rateKey(userId, "report");
+    
+    const result = await limiter.allowPerHour(key, REPORT_CREATE);
+    
+    if (!result.allowed) {
+      console.log(`[RATE LIMIT] Reporting blocked for user ${userId}, retry after ${result.retryAfter}s`);
+    }
+    
+    return result;
+  } catch (err) {
+    console.error("Rate limit check error (report creation):", err.message);
+    // Fail open - allow the request if rate limiter fails
+    return { allowed: true, retryAfter: 0 };
+  }
 }
 
 async function checkPostCreationLimit(userId) {
@@ -292,6 +312,7 @@ export default {
   checkCustomLimit,
   resetRateLimit,
   checkFeedbackLimit,
+  reportCreationLimit,
 };
 
 export {
@@ -308,4 +329,5 @@ export {
   checkCustomLimit,
   resetRateLimit,
   checkFeedbackLimit,
+  reportCreationLimit,
 };

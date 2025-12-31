@@ -1,6 +1,7 @@
 import Comment from "../models/Comment.js";
 import Post from "../models/Post.js";
 import User from "../models/User.js";
+import Report from "../models/Report.js";
 
 // Create a new comment
 export const createComment = async (req, res) => {
@@ -423,6 +424,22 @@ export const hardDeleteComment = async (req, res) => {
   }
 };
 
+export const reportComment = async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const userId = req.user.userId; // From your auth middleware
+
+    const result = await Report.createReport("comment", commentId, userId);
+    res.status(200).json(result);
+  } catch (err) {
+    console.error("Error in reportComment:", err.message);
+    res.status(500).json({
+      success: false,
+      message: "Failed to process report",
+      error: err.message,
+    });
+  }
+};
 //////////
 
 // Upvote a comment
