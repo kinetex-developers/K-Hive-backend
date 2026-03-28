@@ -20,10 +20,14 @@ const router = express.Router();
 router.get(
   "/google",
   isNotAuthenticated,
-  passport.authenticate("google", {
-    scope: ["profile", "email"],
-    session: false,
-  })
+  (req, res, next) => {
+    const state = req.query.source === "mobile" ? "mobile" : "web";
+    passport.authenticate("google", {
+      scope: ["profile", "email"],
+      session: false,
+      state: state
+    })(req, res, next);
+  }
 );
 
 router.get(
