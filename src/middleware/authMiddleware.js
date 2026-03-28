@@ -44,7 +44,7 @@ export const isNotAuthenticated = (req, res, next) => {
   if (!token) {
     return next();
   }
-  const redirectUrl = `myapp://auth?token=${encodeURIComponent(token)}`;
+  const redirectUrl = `khive://auth?token=${encodeURIComponent(token)}`;
 
   return res.redirect(redirectUrl);
   /*
