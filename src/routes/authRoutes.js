@@ -22,10 +22,12 @@ router.get(
   isNotAuthenticated,
   (req, res, next) => {
     const state = req.query.source === "mobile" ? "mobile" : "web";
+
     passport.authenticate("google", {
       scope: ["profile", "email"],
       session: false,
-      state: state
+      state,
+      prompt: req.query.prompt
     })(req, res, next);
   }
 );
