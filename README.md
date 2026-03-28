@@ -637,4 +637,4 @@ This project is licensed under the **Kinetex Labs Personal Use Source License (K
 
 For permission requests, contact: **kinetex.society@gmail.com**
 
-Copyright © 2025 Kinetex Labs and the original authors. All rights reserved.
+Copyright © 2025 Kinetex Labs and the original authors. All rights reserved..
