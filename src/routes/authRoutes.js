@@ -21,14 +21,19 @@ router.get(
   "/google",
   isNotAuthenticated,
   (req, res, next) => {
-    const state = req.query.source === "mobile" ? "mobile" : "web";
+    const isMobile = req.query.source === "mobile";
 
-    passport.authenticate("google", {
+    const options = {
       scope: ["profile", "email"],
       session: false,
-      state,
       prompt: req.query.prompt
-    })(req, res, next);
+    };
+
+    if (isMobile) {
+      options.state = true;
+    }
+
+    passport.authenticate("google", options)(req, res, next);
   }
 );
 

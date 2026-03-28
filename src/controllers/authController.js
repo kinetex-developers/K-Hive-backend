@@ -14,28 +14,23 @@ import User from "../models/User.js";
 // Google authentication callback handler
 export const googleCallback = (req, res) => {
   try {
-    // Generate JWT tokens
     const accessToken = generateToken(req.user);
     const refreshToken = generateRefreshToken(req.user);
 
-    // Set tokens in HTTP-only cookies
     setTokenCookie(res, accessToken);
     setRefreshTokenCookie(res, refreshToken);
 
-    // Redirect to frontend with success
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    if(req.query.state==="mobile")
-    {
-      res.redirect(`khive://auth?token=${accessToken}`);
+
+    if (req.query.state) {
+      return res.redirect(`khive://auth?token=${accessToken}`);
     }
-    else
-    {
-      res.redirect(`${frontendUrl}/auth/success`);
-    }
+
+    return res.redirect(`${frontendUrl}/auth/success`);
   } catch (err) {
     console.error("Google callback error:", err.message);
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    res.redirect(`${frontendUrl}/login?error=auth_failed`);
+    return res.redirect(`${frontendUrl}/login?error=auth_failed`);
   }
 };
 
