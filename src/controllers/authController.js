@@ -24,7 +24,14 @@ export const googleCallback = (req, res) => {
 
     // Redirect to frontend with success
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
-    res.redirect(`${frontendUrl}/auth/success?token=${accessToken}`);
+    if(req.query.state==="mobile")
+    {
+      res.redirect(`khive://auth?token=${accessToken}`);
+    }
+    else
+    {
+      res.redirect(`${frontendUrl}/auth/success`);
+    }
   } catch (err) {
     console.error("Google callback error:", err.message);
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
